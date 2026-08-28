@@ -1,0 +1,99 @@
+/* Layout + theme for SURFTP. The accent border on :focus-within is what
+   makes the active pane unmistakable in the two-pane layout. */
+
+#panes {
+    height: 1fr;
+}
+
+FilePane {
+    width: 1fr;
+    border: round $panel;
+    background: $surface;
+}
+
+FilePane:focus-within {
+    border: round $accent;
+    background: $surface-lighten-1;
+}
+
+/* ---- Modal dialogs -------------------------------------------------
+   One #dialog block styles every modal (connect, vault, host key), so a
+   new dialog inherits the layout instead of restating it. */
+
+ModalScreen {
+    align: center middle;
+    background: $background 60%;
+}
+
+#dialog {
+    width: 72;
+    max-width: 90%;
+    height: auto;
+    padding: 1 2;
+    border: thick $accent;
+    background: $surface;
+}
+
+#dialog .title {
+    text-style: bold;
+    width: 100%;
+    padding-bottom: 1;
+}
+
+#dialog .row {
+    height: auto;
+    width: 100%;
+}
+
+#dialog Input, #dialog Select {
+    width: 1fr;
+    margin: 0 1 1 0;
+}
+
+#dialog Checkbox {
+    margin: 0 1 1 0;
+}
+
+#dialog .buttons {
+    height: auto;
+    align-horizontal: right;
+    padding-top: 1;
+}
+
+#dialog .buttons Button {
+    margin-left: 1;
+}
+
+/* Warnings carry real consequences (clear-text FTP, no vault recovery,
+   an unverified host key) so they must not read as body text. */
+#dialog .warning {
+    color: $warning;
+    padding-bottom: 1;
+}
+
+#dialog .error {
+    color: $error;
+}
+
+#dialog .hint {
+    color: $text-muted;
+    padding-top: 1;
+}
+
+#dialog .fingerprint {
+    background: $panel;
+    padding: 1;
+    margin-bottom: 1;
+}
+
+#dialog OptionList {
+    height: auto;
+    max-height: 14;
+    margin-bottom: 1;
+}
+
+/* Conditional form fields: hidden must also stop taking up layout space,
+   or the dialog keeps a gap where the irrelevant field used to be. */
+.hidden {
+    display: none;
+}
