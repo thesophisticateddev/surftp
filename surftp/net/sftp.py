@@ -32,8 +32,13 @@ class _SFTPReader:
         return data if isinstance(data, bytes) else b""
 
     async def close(self) -> None:
-        """Close the SFTP file handle."""
-        self._fp.close()
+        """Close the SFTP file handle.
+
+        ``SFTPClientFile.close`` is a coroutine; calling it without awaiting
+        left the remote handle open and only surfaced as a "coroutine was never
+        awaited" warning.
+        """
+        await self._fp.close()
 
 
 class _SFTPWriter:
@@ -47,8 +52,12 @@ class _SFTPWriter:
         await self._fp.write(data)
 
     async def close(self) -> None:
-        """Close the SFTP file handle."""
-        self._fp.close()
+        """Close the SFTP file handle, flushing any buffered write.
+
+        Must be awaited: this is where the last chunk actually reaches the
+        server, so a fire-and-forget close can truncate the file.
+        """
+        await self._fp.close()
 
 
 class SFTPFileSystem:
@@ -154,7 +163,11 @@ class SFTPFileSystem:
     async def open_read(self, path: str) -> _SFTPReader:
         """Open ``path`` for reading."""
         try:
-            fp = await self._client.open(path, "r")
+            # "rb", not "r": asyncssh's text mode decodes to str, and the
+            # transfer engine works in bytes. In text mode _SFTPReader saw a
+            # str, returned b"" for it, and every download silently produced an
+            # empty file that reported success.
+            fp = await self._client.open(path, "rb")
         except asyncssh.SFTPError as exc:
             raise FileSystemError(f"Cannot open {path} for reading: {_sftp_reason(exc)}") from exc
         except (OSError, asyncssh.Error) as exc:
@@ -164,7 +177,10 @@ class SFTPFileSystem:
     async def open_write(self, path: str, size_hint: int = 0) -> _SFTPWriter:
         """Open ``path`` for writing (truncating)."""
         try:
-            fp = await self._client.open(path, "w")
+            # "wb", not "w": writing bytes to a text-mode handle raises
+            # AttributeError ('bytes' object has no attribute 'encode'), which
+            # left uploads stuck at 0% forever.
+            fp = await self._client.open(path, "wb")
         except asyncssh.SFTPError as exc:
             raise FileSystemError(f"Cannot open {path} for writing: {_sftp_reason(exc)}") from exc
         except (OSError, asyncssh.Error) as exc:

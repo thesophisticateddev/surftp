@@ -5,7 +5,7 @@ set -u
 cd "$(dirname "$0")/.."
 PY=./tenv/bin/python
 status=0
-for suite in tests/test_vault.py tests/test_ui.py tests/test_sessions.py tests/test_integration.py tests/test_ftp.py tests/test_ui_connect.py; do
+for suite in tests/test_vault.py tests/test_ui.py tests/test_sessions.py tests/test_integration.py tests/test_ftp.py tests/test_transfer.py tests/test_ui_connect.py; do
     echo "════ $suite"
     PYTHONPATH="$PWD" $PY "$suite" || status=1
 done
