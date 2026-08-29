@@ -36,15 +36,53 @@ class FileEntry:
     is_dir: bool
     size: int  # bytes; 0 for directories
     modified: float  # POSIX timestamp
+    permissions: int = 0  # full POSIX st_mode where known; 0 = "backend did not say"
+
+
+@runtime_checkable
+class AsyncFileReader(Protocol):
+    """A readable file handle returned by ``FileSystem.open_read``.
+
+    Backends may wrap a local file, an SFTP channel or an FTP data stream —
+    the transfer engine only needs ``read`` and ``close``.
+    """
+
+    async def read(self, size: int) -> bytes:
+        """Read up to ``size`` bytes; return ``b""`` at EOF."""
+        ...
+
+    async def close(self) -> None:
+        """Release the handle."""
+        ...
+
+
+@runtime_checkable
+class AsyncFileWriter(Protocol):
+    """A writable file handle returned by ``FileSystem.open_write``.
+
+    The transfer engine writes chunks and closes on completion. A partial
+    write that is not followed by ``close`` leaves a ``.surftp-partial-*``
+    file that the engine cleans up on cancellation.
+    """
+
+    async def write(self, data: bytes) -> None:
+        """Write ``data`` to the file."""
+        ...
+
+    async def close(self) -> None:
+        """Flush and release the handle."""
+        ...
 
 
 @runtime_checkable
 class FileSystem(Protocol):
     """The protocol-agnostic backend interface every pane talks to.
 
-    Three methods is the whole contract; adding a remote backend means
-    implementing exactly these. ``label`` is what the pane shows in its border
-    title so a remote pane can render ``user@host`` instead of a bare path.
+    The browsing methods (``list_directory``, ``parent_of``, ``is_directory``)
+    are what the panes use. The transfer methods (``open_read``, ``open_write``,
+    ``make_directory``, ``stat``) are what the transfer engine uses. Keeping
+    both in one protocol means the engine copies between two ``FileSystem``
+    objects and never learns which protocols it is bridging.
     """
 
     @property
@@ -62,6 +100,30 @@ class FileSystem(Protocol):
 
     async def is_directory(self, path: str) -> bool:
         """Return whether ``path`` is a directory."""
+        ...
+
+    async def stat(self, path: str) -> FileEntry:
+        """Return a ``FileEntry`` for ``path``; raise ``FileSystemError`` if it does not exist."""
+        ...
+
+    async def open_read(self, path: str) -> AsyncFileReader:
+        """Open ``path`` for reading; raise ``FileSystemError`` on failure."""
+        ...
+
+    async def open_write(self, path: str, size_hint: int = 0) -> AsyncFileWriter:
+        """Open ``path`` for writing (truncating); raise ``FileSystemError`` on failure."""
+        ...
+
+    async def make_directory(self, path: str) -> None:
+        """Create ``path`` as a directory (including parents); raise ``FileSystemError`` on failure."""
+        ...
+
+    async def remove(self, path: str) -> None:
+        """Delete a file at ``path``; raise ``FileSystemError`` on failure."""
+        ...
+
+    async def rename(self, src: str, dst: str) -> None:
+        """Rename ``src`` to ``dst``; raise ``FileSystemError`` on failure."""
         ...
 
 
@@ -105,3 +167,65 @@ def format_modified(timestamp: float) -> str:
     if not timestamp:
         return ""
     return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
+
+
+def format_permissions(permissions: int, is_dir: bool) -> str:
+    """Render a permissions column cell as a 10-character POSIX mode string.
+
+    Returns the familiar ``drwxr-xr-x`` format. Honors setuid/setgid/sticky
+    bits (``rws``, ``rwt``). When ``permissions == 0``, returns an empty string
+    rather than ``----------`` — a blank cell says "unknown"; ten dashes falsely
+    asserts "no permissions at all", and FTP servers that omit the mode would
+    make every file look unreadable.
+
+    The type character comes from ``stat.S_IFMT`` when the mode carries type
+    bits, else falls back to ``d``/``-`` from ``is_dir``.
+    """
+    import stat
+
+    if permissions == 0:
+        return ""
+
+    # Type character
+    file_type = stat.S_IFMT(permissions)
+    if file_type == stat.S_IFDIR:
+        type_char = "d"
+    elif file_type == stat.S_IFLNK:
+        type_char = "l"
+    elif file_type == stat.S_IFSOCK:
+        type_char = "s"
+    elif file_type == stat.S_IFIFO:
+        type_char = "p"
+    elif file_type == stat.S_IFBLK:
+        type_char = "b"
+    elif file_type == stat.S_IFCHR:
+        type_char = "c"
+    else:
+        type_char = "-" if not is_dir else "d"
+
+    # Permission bits
+    mode = permissions & 0o7777
+    owner = (mode >> 6) & 0o7
+    group = (mode >> 3) & 0o7
+    other = mode & 0o7
+
+    def triplet(bits: int, special: bool, special_char: str) -> str:
+        """Render one rwx triplet with optional special bit."""
+        r = "r" if bits & 4 else "-"
+        w = "w" if bits & 2 else "-"
+        if special:
+            x = special_char if bits & 1 else special_char.upper()
+        else:
+            x = "x" if bits & 1 else "-"
+        return r + w + x
+
+    # Setuid/setgid/sticky
+    setuid = bool(mode & stat.S_ISUID)
+    setgid = bool(mode & stat.S_ISGID)
+    sticky = bool(mode & stat.S_ISVTX)
+
+    owner_str = triplet(owner, setuid, "s")
+    group_str = triplet(group, setgid, "s")
+    other_str = triplet(other, sticky, "t")
+
+    return type_char + owner_str + group_str + other_str

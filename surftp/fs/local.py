@@ -7,10 +7,53 @@ reproduce the same semantics — sort order, parent link, and the
 
 from __future__ import annotations
 
+import asyncio
 import os
 import stat as stat_module
+from pathlib import Path
 
 from surftp.fs.types import FileEntry, FileSystemError, sort_entries
+
+
+class _LocalReader:
+    """Async wrapper around a local file opened for reading.
+
+    Disk I/O is fast but not instant, and a 4 GB read on the event loop would
+    freeze the UI exactly as a hung socket would. ``asyncio.to_thread`` keeps
+    the event loop responsive.
+    """
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+        self._fp = open(path, "rb")  # noqa: SIM115
+
+    async def read(self, size: int) -> bytes:
+        """Read up to ``size`` bytes off the event loop."""
+        return await asyncio.to_thread(self._fp.read, size)
+
+    async def close(self) -> None:
+        """Close the file handle."""
+        await asyncio.to_thread(self._fp.close)
+
+
+class _LocalWriter:
+    """Async wrapper around a local file opened for writing.
+
+    Writes go through ``asyncio.to_thread`` for the same reason reads do:
+    the event loop must stay responsive during a large upload.
+    """
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+        self._fp = open(path, "wb")  # noqa: SIM115
+
+    async def write(self, data: bytes) -> None:
+        """Write ``data`` off the event loop."""
+        await asyncio.to_thread(self._fp.write, data)
+
+    async def close(self) -> None:
+        """Flush and close the file handle."""
+        await asyncio.to_thread(self._fp.close)
 
 
 class LocalFileSystem:
@@ -56,6 +99,7 @@ class LocalFileSystem:
                     is_dir=is_dir,
                     size=0 if is_dir else st.st_size,
                     modified=st.st_mtime,
+                    permissions=st.st_mode,
                 )
             )
 
@@ -73,3 +117,54 @@ class LocalFileSystem:
     async def is_directory(self, path: str) -> bool:
         """Return whether ``path`` is a directory."""
         return os.path.isdir(path)
+
+    async def stat(self, path: str) -> FileEntry:
+        """Return a ``FileEntry`` for ``path``; raise ``FileSystemError`` if it does not exist."""
+        try:
+            st = os.stat(path, follow_symlinks=False)
+        except (FileNotFoundError, OSError) as exc:
+            raise FileSystemError(f"Cannot stat {path}: {exc.strerror or exc}") from exc
+        is_dir = stat_module.S_ISDIR(st.st_mode)
+        return FileEntry(
+            name=os.path.basename(path),
+            path=path,
+            is_dir=is_dir,
+            size=0 if is_dir else st.st_size,
+            modified=st.st_mtime,
+            permissions=st.st_mode,
+        )
+
+    async def open_read(self, path: str) -> _LocalReader:
+        """Open ``path`` for reading."""
+        try:
+            return _LocalReader(path)
+        except (FileNotFoundError, PermissionError, OSError) as exc:
+            raise FileSystemError(f"Cannot open {path} for reading: {exc.strerror or exc}") from exc
+
+    async def open_write(self, path: str, size_hint: int = 0) -> _LocalWriter:
+        """Open ``path`` for writing (truncating)."""
+        try:
+            return _LocalWriter(path)
+        except (PermissionError, OSError) as exc:
+            raise FileSystemError(f"Cannot open {path} for writing: {exc.strerror or exc}") from exc
+
+    async def make_directory(self, path: str) -> None:
+        """Create ``path`` as a directory (including parents)."""
+        try:
+            Path(path).mkdir(parents=True, exist_ok=True)
+        except (PermissionError, OSError) as exc:
+            raise FileSystemError(f"Cannot create directory {path}: {exc.strerror or exc}") from exc
+
+    async def remove(self, path: str) -> None:
+        """Delete a file at ``path``."""
+        try:
+            os.remove(path)
+        except (FileNotFoundError, PermissionError, OSError) as exc:
+            raise FileSystemError(f"Cannot remove {path}: {exc.strerror or exc}") from exc
+
+    async def rename(self, src: str, dst: str) -> None:
+        """Rename ``src`` to ``dst``."""
+        try:
+            os.rename(src, dst)
+        except (FileNotFoundError, PermissionError, OSError) as exc:
+            raise FileSystemError(f"Cannot rename {src} to {dst}: {exc.strerror or exc}") from exc

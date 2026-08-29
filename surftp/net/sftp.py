@@ -16,6 +16,41 @@ from surftp.fs.types import FileEntry, FileSystemError, sort_entries
 from surftp.net.types import ConnectionProfile
 
 
+class _SFTPReader:
+    """Async wrapper around an SFTP file opened for reading.
+
+    asyncssh's SFTP file objects already pipeline reads with a configurable
+    window (``block_size``, ``max_requests``), so this is a thin adapter.
+    """
+
+    def __init__(self, fp: asyncssh.SFTPClientFile) -> None:
+        self._fp = fp
+
+    async def read(self, size: int) -> bytes:
+        """Read up to ``size`` bytes; return ``b""`` at EOF."""
+        data = await self._fp.read(size)
+        return data if isinstance(data, bytes) else b""
+
+    async def close(self) -> None:
+        """Close the SFTP file handle."""
+        self._fp.close()
+
+
+class _SFTPWriter:
+    """Async wrapper around an SFTP file opened for writing."""
+
+    def __init__(self, fp: asyncssh.SFTPClientFile) -> None:
+        self._fp = fp
+
+    async def write(self, data: bytes) -> None:
+        """Write ``data`` to the remote file."""
+        await self._fp.write(data)
+
+    async def close(self) -> None:
+        """Close the SFTP file handle."""
+        self._fp.close()
+
+
 class SFTPFileSystem:
     """A pane backend over one SFTP channel of an established ``SSHSession``."""
 
@@ -61,6 +96,7 @@ class SFTPFileSystem:
                     is_dir=is_dir,
                     size=0 if is_dir else int(attrs.size or 0),
                     modified=float(attrs.mtime or 0),
+                    permissions=permissions,
                 )
             )
 
@@ -96,6 +132,72 @@ class SFTPFileSystem:
             return path
         return resolved.decode("utf-8", "replace") if isinstance(resolved, bytes) else str(resolved)
 
+    async def stat(self, path: str) -> FileEntry:
+        """Return a ``FileEntry`` for ``path``; raise ``FileSystemError`` if it does not exist."""
+        try:
+            attrs = await self._client.stat(path)
+        except asyncssh.SFTPError as exc:
+            raise FileSystemError(f"Cannot stat {path}: {_sftp_reason(exc)}") from exc
+        except (OSError, asyncssh.Error) as exc:
+            raise FileSystemError(f"Connection lost while stat-ing {path}: {exc}") from exc
+        permissions = attrs.permissions or 0
+        is_dir = stat_module.S_ISDIR(permissions)
+        return FileEntry(
+            name=posixpath.basename(path),
+            path=path,
+            is_dir=is_dir,
+            size=0 if is_dir else int(attrs.size or 0),
+            modified=float(attrs.mtime or 0),
+            permissions=permissions,
+        )
+
+    async def open_read(self, path: str) -> _SFTPReader:
+        """Open ``path`` for reading."""
+        try:
+            fp = await self._client.open(path, "r")
+        except asyncssh.SFTPError as exc:
+            raise FileSystemError(f"Cannot open {path} for reading: {_sftp_reason(exc)}") from exc
+        except (OSError, asyncssh.Error) as exc:
+            raise FileSystemError(f"Connection lost while opening {path}: {exc}") from exc
+        return _SFTPReader(fp)
+
+    async def open_write(self, path: str, size_hint: int = 0) -> _SFTPWriter:
+        """Open ``path`` for writing (truncating)."""
+        try:
+            fp = await self._client.open(path, "w")
+        except asyncssh.SFTPError as exc:
+            raise FileSystemError(f"Cannot open {path} for writing: {_sftp_reason(exc)}") from exc
+        except (OSError, asyncssh.Error) as exc:
+            raise FileSystemError(f"Connection lost while opening {path}: {exc}") from exc
+        return _SFTPWriter(fp)
+
+    async def make_directory(self, path: str) -> None:
+        """Create ``path`` as a directory (including parents)."""
+        try:
+            await self._client.makedirs(path)
+        except asyncssh.SFTPError as exc:
+            raise FileSystemError(f"Cannot create directory {path}: {_sftp_reason(exc)}") from exc
+        except (OSError, asyncssh.Error) as exc:
+            raise FileSystemError(f"Connection lost while creating {path}: {exc}") from exc
+
+    async def remove(self, path: str) -> None:
+        """Delete a file at ``path``."""
+        try:
+            await self._client.remove(path)
+        except asyncssh.SFTPError as exc:
+            raise FileSystemError(f"Cannot remove {path}: {_sftp_reason(exc)}") from exc
+        except (OSError, asyncssh.Error) as exc:
+            raise FileSystemError(f"Connection lost while removing {path}: {exc}") from exc
+
+    async def rename(self, src: str, dst: str) -> None:
+        """Rename ``src`` to ``dst``."""
+        try:
+            await self._client.rename(src, dst)
+        except asyncssh.SFTPError as exc:
+            raise FileSystemError(f"Cannot rename {src} to {dst}: {_sftp_reason(exc)}") from exc
+        except (OSError, asyncssh.Error) as exc:
+            raise FileSystemError(f"Connection lost while renaming {src}: {exc}") from exc
+
     def close(self) -> None:
         """Close the SFTP channel, leaving the parent SSH connection open.
 
@@ -111,5 +213,5 @@ def _sftp_reason(exc: asyncssh.SFTPError) -> str:
     if exc.code == asyncssh.FX_PERMISSION_DENIED:
         return "permission denied"
     if exc.code == asyncssh.FX_NO_SUCH_FILE:
-        return "no such directory"
+        return "no such file"
     return reason

@@ -24,6 +24,7 @@ from surftp.fs import (
     FileSystemError,
     LocalFileSystem,
     format_modified,
+    format_permissions,
     format_size,
 )
 from surftp.net.connect import RemoteConnection
@@ -80,6 +81,29 @@ class FilePane(Static):
         return self._table
 
     @property
+    def is_ready(self) -> bool:
+        """Whether ``on_mount`` has built the table yet.
+
+        A pane added to a session tab is mounted *asynchronously*, so callers
+        can legitimately reach it before its table exists. They ask this rather
+        than tripping the assertion in :attr:`table`.
+        """
+        return self._table is not None
+
+    def focus_table(self) -> bool:
+        """Focus the listing table if it exists, reporting whether it did.
+
+        Focus is requested from several places that cannot know how far along
+        mounting is — tab activation, session creation, app start-up. Making
+        the pane answer for its own readiness keeps that knowledge in the one
+        object that owns ``_table``, instead of every caller guessing.
+        """
+        if self._table is None:
+            return False
+        self._table.focus()
+        return True
+
+    @property
     def filesystem(self) -> FileSystem:
         """The backend currently driving this pane."""
         return self._filesystem
@@ -127,7 +151,7 @@ class FilePane(Static):
                 entry.name,
                 format_size(entry.size, entry.is_dir),
                 format_modified(entry.modified),
-                "d" if entry.is_dir else "-",
+                format_permissions(entry.permissions, entry.is_dir),
             )
         self.border_subtitle = f"{len(entries)} items"
         if restore_cursor is not None and table.row_count:
@@ -198,15 +222,25 @@ class FilePane(Static):
         self._filesystem = connection.filesystem
         self.path = connection.initial_path
 
+    async def close_connection(self) -> None:
+        """Close this pane's connection without touching the UI.
+
+        Used at shutdown: re-listing a local directory into a widget that is
+        being destroyed is pointless, and starting a worker during teardown
+        races the app's own shutdown. :meth:`detach_connection` is the
+        interactive path that also restores the local view.
+        """
+        connection, self._connection = self._connection, None
+        if connection is not None:
+            await connection.close()
+
     async def detach_connection(self) -> None:
         """Close any remote connection and return the pane to the local disk.
 
         Restores the last local path rather than the current remote one, which
         would be meaningless (and possibly nonexistent) locally.
         """
-        connection, self._connection = self._connection, None
+        await self.close_connection()
         self._filesystem = LocalFileSystem()
-        if connection is not None:
-            await connection.close()
         self.path = self._local_path
         self.load_directory()  # in case the local path was already current

@@ -1,4 +1,4 @@
-"""Modal screens for unlocking the vault, trusting a host, and prompting for a secret.
+"""Modal screens for unlocking the vault, trusting a host, prompting for a secret, and resolving transfer conflicts.
 
 Every screen here returns its result through ``dismiss``, so callers await a
 value instead of wiring callbacks. Password inputs are always ``password=True``
@@ -12,6 +12,8 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Static
+
+from surftp.transfer.types import ConflictPolicy
 
 
 class MasterPasswordScreen(ModalScreen[str | None]):
@@ -200,3 +202,58 @@ class MessageScreen(ModalScreen[None]):
     def action_close(self) -> None:
         """Close the message."""
         self.dismiss(None)
+
+
+class ConflictScreen(ModalScreen[ConflictPolicy]):
+    """Ask what to do when a destination file already exists.
+
+    Offers Overwrite / Overwrite all / Skip / Skip all / Rename, with **Skip
+    focused by default** — the same reasoning as the host-key dialog: the
+    non-destructive option is what an unread Enter must choose.
+    """
+
+    BINDINGS = [("escape", "skip", "Skip")]
+
+    def __init__(self, filename: str) -> None:
+        """Show the conflict dialog for ``filename``."""
+        super().__init__()
+        self._filename = filename
+
+    def compose(self) -> ComposeResult:
+        """Yield the prompt and the five buttons."""
+        with Vertical(id="dialog"):
+            yield Label(f"File already exists: {self._filename}", classes="title")
+            yield Static(
+                "Choose what to do. Skip is the safe default — it leaves the existing file untouched.",
+                classes="warning",
+            )
+            with Horizontal(classes="buttons"):
+                yield Button("Skip", variant="primary", id="skip")
+                yield Button("Skip all", id="skip_all")
+                yield Button("Overwrite", variant="warning", id="overwrite")
+                yield Button("Overwrite all", id="overwrite_all")
+                yield Button("Rename", id="rename")
+
+    def on_mount(self) -> None:
+        """Focus Skip, so an unread Enter is the safe answer."""
+        self.query_one("#skip", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Return the chosen policy."""
+        match event.button.id:
+            case "skip":
+                self.dismiss(ConflictPolicy.SKIP)
+            case "skip_all":
+                self.dismiss(ConflictPolicy.SKIP)  # app interprets as "all"
+            case "overwrite":
+                self.dismiss(ConflictPolicy.OVERWRITE)
+            case "overwrite_all":
+                self.dismiss(ConflictPolicy.OVERWRITE)  # app interprets as "all"
+            case "rename":
+                self.dismiss(ConflictPolicy.RENAME)
+            case _:
+                self.dismiss(ConflictPolicy.SKIP)
+
+    def action_skip(self) -> None:
+        """Escape skips this file."""
+        self.dismiss(ConflictPolicy.SKIP)

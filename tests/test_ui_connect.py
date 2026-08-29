@@ -79,9 +79,14 @@ async def main() -> None:
     app = SurfFTPApp(vault_path=WORK / "vault.duckdb")
     try:
         async with app.run_test() as pilot:
-            left, right = app.left_pane, app.right_pane
+            # Session tabs mean "the left pane" is a different FilePane per tab:
+            # connecting opens a NEW pane rather than mutating the existing one.
+            # These read app.left_pane / app.right_pane at each point of use so
+            # they assert on the pane the user is actually looking at.
+            left = lambda: app.left_pane
+            right = lambda: app.right_pane
             await pilot.pause(0.3)
-            local_path = left.path
+            local_path = left().path
 
             print("\n[1] first connect prompts to trust the host key")
             await fill_dialog(app, pilot, PASSWORD)
@@ -99,30 +104,30 @@ async def main() -> None:
             await pilot.pause(1.2)
 
             print("\n[2] the pane is now remote and lists the server")
-            check("pane is remote", left.is_remote)
-            names = [str(left.table.get_row_at(i)[0]) for i in range(left.table.row_count)]
+            check("pane is remote", left().is_remote)
+            names = [str(left().table.get_row_at(i)[0]) for i in range(left().table.row_count)]
             check("remote listing rendered", "remote-only.txt" in names, str(names))
             check("directories first", names[:2] == ["..", "remote-dir"], str(names))
-            check("title shows user@host", "127.0.0.1" in str(left.border_title), str(left.border_title))
-            check("other pane stayed local", not right.is_remote and right.path == local_path)
+            check("title shows user@host", "127.0.0.1" in str(left().border_title), str(left().border_title))
+            check("other pane stayed local", not right().is_remote and right().path == local_path)
 
             print("\n[3] the UI stays responsive while remote")
             await pilot.press("tab")
-            check("tab still switches panes", app.active_pane is right)
+            check("tab still switches panes", app.active_pane is right())
             await pilot.press("tab")
             await pilot.press("enter")  # descend into remote-dir via ".."/cursor
             await pilot.pause(0.6)
-            check("navigation works remotely", left.path != str(SERVE_ROOT), left.path)
+            check("navigation works remotely", left().path != str(SERVE_ROOT), left().path)
             await pilot.press("ctrl+r")
             await pilot.pause(0.6)
-            check("remote refresh works", "Error" not in str(left.border_subtitle), str(left.border_subtitle))
+            check("remote refresh works", "Error" not in str(left().border_subtitle), str(left().border_subtitle))
 
             print("\n[4] disconnect restores the local pane")
             await pilot.press("ctrl+d")
             await pilot.pause(0.8)
-            check("pane is local again", not left.is_remote)
-            check("returned to the previous local path", left.path == local_path, left.path)
-            local_names = [str(left.table.get_row_at(i)[0]) for i in range(left.table.row_count)]
+            check("pane is local again", not left().is_remote)
+            check("returned to the previous local path", left().path == local_path, left().path)
+            local_names = [str(left().table.get_row_at(i)[0]) for i in range(left().table.row_count)]
             check("local listing restored", "remote-only.txt" not in local_names)
 
             print("\n[5] a wrong password reports itself specifically")
