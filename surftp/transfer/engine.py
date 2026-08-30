@@ -194,13 +194,26 @@ class TransferEngine:
                     progress.bytes_done = item.size
                     self._on_progress(progress)
                     return
-                except (FileSystemError, OSError, asyncio.CancelledError) as exc:
-                    if attempt < MAX_RETRIES:
+                except asyncio.CancelledError:
+                    # Cancellation is a decision, not a transient fault: never
+                    # retry it, and let it propagate so the gather unwinds.
+                    progress.state = TransferState.CANCELLED
+                    self._on_progress(progress)
+                    await self._cleanup_partial(partial_path)
+                    raise
+                except Exception as exc:
+                    # Deliberately broad, and only at this boundary. Each item
+                    # runs as its own task under `gather(return_exceptions=True)`,
+                    # so anything not caught here is swallowed and the item sits
+                    # at RUNNING 0% forever with nothing shown to the user —
+                    # which is precisely how a bytes/str mode bug in a backend
+                    # presented as "the transfer is stuck".
+                    if attempt < MAX_RETRIES and isinstance(exc, (FileSystemError, OSError)):
                         await asyncio.sleep(0.1 * (attempt + 1))
                         progress.bytes_done = 0
                         continue
                     progress.state = TransferState.FAILED
-                    progress.error = str(exc)
+                    progress.error = f"{type(exc).__name__}: {exc}"
                     self._on_progress(progress)
                     await self._cleanup_partial(partial_path)
                     return

@@ -92,3 +92,49 @@ The engine writes to a **partial file** (`.surftp-partial-*`) and renames on com
 ## What this sets up
 
 The transfer engine is ready for the SSH tunnel plan (`plan-tunnel.md`), which will add port-forwarding over the existing `SSHSession`. The tunnel will be another channel on the same connection, consistent with the "one connection, many channels" rule.
+
+---
+
+## Follow-up: uploads stuck at 0% (2026-08-29)
+
+Reported: pressing copy to an SFTP server queued the item in the panel, then sat at 0% forever with
+no error. Reproduced headlessly (local → SFTP through the UI), and it was three bugs in one.
+
+### Root cause: asyncssh text mode
+
+`SFTPFileSystem` opened remote files as `open(path, "r")` and `open(path, "w")`. Those are asyncssh's
+**text** modes, which deal in `str`, not `bytes`:
+
+* **Uploads** — `write(bytes)` on a text-mode handle raises
+  `AttributeError: 'bytes' object has no attribute 'encode'`. Fixed: `"wb"`.
+* **Downloads** — `read()` returns `str`, and `_SFTPReader.read` coerced any non-`bytes` result to
+  `b""`, which the engine reads as EOF. **Every download silently produced an empty file and
+  reported success** — never reported, and worse than the bug that was. Fixed: `"rb"`.
+
+### Why it hung instead of failing
+
+`_copy_file` caught only `(FileSystemError, OSError, asyncio.CancelledError)`. The `AttributeError`
+escaped, killed that item's task, and was swallowed by `gather(..., return_exceptions=True)` — so the
+item stayed `RUNNING` at 0 bytes with nothing surfaced. The per-item boundary now catches `Exception`
+and marks the item `FAILED` with `type: message`; a backend bug is now a visible error rather than a
+hang. `CancelledError` is handled separately and re-raised — it was previously *retried*, which meant
+cancelling a transfer tried twice more before giving up.
+
+### Also fixed
+
+`SFTPClientFile.close()` is a coroutine and was called without `await` in both the reader and the
+writer. It only showed as a "coroutine was never awaited" warning, but it meant the remote handle was
+never closed and a buffered final chunk could be lost.
+
+The FTP backend uses `download_stream`/`upload_stream`, which are binary; it was unaffected.
+
+### Added
+
+`tests/test_transfer.py` (17 checks, wired into `run_all.sh`) — upload and download compared
+**byte-for-byte** with BLAKE2b over 2 MB of random data (non-UTF-8 bytes, which is what text mode
+corrupts), progress actually reaching the file size, no partial left behind, and a transfer into a
+read-only remote directory reporting `FAILED` rather than sitting at 0%.
+
+**This shipped because there was no transfer suite at all** — the transfers pass was verified by
+reasoning and a UI pilot, not by moving bytes to a real server and comparing them. That is the gap
+the new suite closes.
