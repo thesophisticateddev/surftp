@@ -61,6 +61,9 @@ Implemented (see `.plans/results/`):
   names the actual cause of every failure.
 - **Encrypted credential vault** — `surftp/store/`: DuckDB + Argon2id/AES-256-GCM envelope
   encryption, master-password unlock, profile CRUD, master-password rotation.
+- **SSH as a first-class connection** — `Protocol.SSH` with no pane backend, a reference-counted
+  `SSHConnectionManager`, multi-key auth, jump hosts, port forwards, a Connections panel and a
+  v1→v2 vault migration (see `.plans/results/ssh-connections-2026-09-02.md`).
 - **Dialogs** — connect, saved-profile picker, master password, host-key trust, secret prompt.
 
 Not built yet: file transfers between panes (`plan-transfers.md`) and the SSH tunnel

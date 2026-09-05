@@ -12,7 +12,7 @@ import stat as stat_module
 
 import asyncssh
 
-from surftp.fs.types import FileEntry, FileSystemError, sort_entries
+from surftp.fs.types import FileEntry, FileSystemError, remote_join, sort_entries
 from surftp.net.types import ConnectionProfile
 
 
@@ -116,6 +116,15 @@ class SFTPFileSystem:
                 FileEntry(name="..", path=await self.parent_of(path), is_dir=True, size=0, modified=0.0),
             )
         return entries
+
+    def join_path(self, base: str, name: str) -> str:
+        """Join a remote path using SFTP's POSIX wire rules.
+
+        Delegates to ``remote_join`` so the SFTP and FTP backends cannot drift
+        apart, and so a Windows-reporting server is handled with ``ntpath``
+        rather than the client's ``os.path``.
+        """
+        return remote_join(base, name)
 
     async def parent_of(self, path: str) -> str:
         """Return the parent of a remote path, using POSIX rules regardless of local OS.

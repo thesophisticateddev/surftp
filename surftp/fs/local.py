@@ -109,6 +109,16 @@ class LocalFileSystem:
             entries.insert(0, FileEntry(name="..", path=parent, is_dir=True, size=0, modified=0.0))
         return entries
 
+    def join_path(self, base: str, name: str) -> str:
+        """Join using the client's own path rules.
+
+        ``os.path`` is correct here and *only* here: this filesystem really is
+        the local machine, so the local platform's separator is the right one
+        (``ntpath`` on Windows, ``posixpath`` elsewhere). Remote backends must
+        never reason this way — see ``remote_join``.
+        """
+        return os.path.join(base, name)
+
     async def parent_of(self, path: str) -> str:
         """Return the parent path of ``path``, or ``path`` itself at the root."""
         parent = os.path.dirname(path)

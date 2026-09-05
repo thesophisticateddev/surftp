@@ -13,6 +13,7 @@ path in the pane beats branching on whether a backend returns a coroutine.
 
 from __future__ import annotations
 
+import posixpath
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol, runtime_checkable
@@ -98,6 +99,18 @@ class FileSystem(Protocol):
         """Return the parent of ``path``, or ``path`` itself at the root."""
         ...
 
+    def join_path(self, base: str, name: str) -> str:
+        """Join ``base`` and ``name`` using *this* filesystem's path rules.
+
+        Synchronous: joining is string arithmetic, never I/O.
+
+        This belongs to the backend for the same reason ``parent_of`` does — the
+        backend is the only component that knows its own path syntax. A caller
+        that inspects the string and guesses is guessing about something already
+        known for certain, and will guess wrong on the cases that matter.
+        """
+        ...
+
     async def is_directory(self, path: str) -> bool:
         """Return whether ``path`` is a directory."""
         ...
@@ -125,6 +138,54 @@ class FileSystem(Protocol):
     async def rename(self, src: str, dst: str) -> None:
         """Rename ``src`` to ``dst``; raise ``FileSystemError`` on failure."""
         ...
+
+
+def remote_join(base: str, name: str) -> str:
+    """Join a path on a remote filesystem whose wire format is POSIX.
+
+    Shared by the SFTP and FTP backends. Both protocols specify ``/`` as the
+    separator, so POSIX rules are the default and the common case.
+
+    The exception is a server that reports native Windows paths (``C:\\Users``
+    or a ``\\\\server\\share`` UNC). Joining those with ``/`` yields a mixed
+    separator like ``C:\\Users/file.txt``. They are joined with ``ntpath``
+    **explicitly** — never ``os.path``, which is the *client's* module and
+    silently becomes ``posixpath`` on Linux and macOS, turning the Windows
+    branch into a no-op on every non-Windows client.
+
+    Note that OpenSSH-for-Windows usually reports ``/C:/Users``-style paths,
+    which are POSIX-shaped and correctly take the default branch.
+    """
+    if _is_windows_style(base):
+        import ntpath
+
+        return ntpath.join(base, name)
+    return posixpath.join(base, name)
+
+
+def _is_windows_style(path: str) -> bool:
+    """Whether ``path`` uses native Windows syntax (drive letter or UNC prefix).
+
+    Deliberately narrow: only a drive-letter root (``C:\\``) or a UNC prefix
+    (``\\\\host``) counts. A bare backslash elsewhere is not enough — it is a
+    legal character in a POSIX filename, and treating it as a platform signal
+    would corrupt paths that merely contain one.
+    """
+    if path.startswith("\\\\"):
+        return True
+    return len(path) >= 3 and path[1] == ":" and path[2] in "\\/" and path[0].isalpha()
+
+
+def display_name(path: str) -> str:
+    """Basename of a path from *either* platform, for labels only.
+
+    Used where a path is being shown to the user rather than acted on, so it
+    must not assume the separator: ``posixpath.basename`` on ``C:\\a\\b.txt``
+    returns the whole string, which shows the user a full path where a filename
+    belongs. Splitting on both separators is right for display and wrong for
+    anything else — do not use this to build paths, use ``FileSystem.join_path``.
+    """
+    return path.replace("\\", "/").rstrip("/").rpartition("/")[2] or path
 
 
 def sort_entries(entries: list[FileEntry]) -> list[FileEntry]:

@@ -12,7 +12,6 @@ unanswerable by reading any single file.
 
 from __future__ import annotations
 
-import posixpath
 from pathlib import Path
 
 from textual import events, work
@@ -24,15 +23,20 @@ from textual.widgets import Footer, Header
 
 from surftp.bindings import BINDINGS
 from surftp.fs import LocalFileSystem
+from surftp.fs.types import display_name
 from surftp.net import hostkeys
 from surftp.net.connect import RemoteConnection, open_connection, resolve_credential
+from surftp.net.credential_cache import get_credential_cache
+from surftp.net.manager import get_manager
 from surftp.net.types import (
     AuthMethod,
     ConnectionProfile,
     Credential,
     HostKeyUnknown,
     NetworkError,
+    Protocol,
     SecretKind,
+    key_passphrase_kind,
 )
 from surftp.shell.session import ShellSession
 from surftp.store import Vault, VaultLockedError, default_vault_path
@@ -40,6 +44,7 @@ from surftp.transfer import ConflictPolicy, TransferEngine, plan_transfer
 from surftp.widgets import FilePane
 from surftp.widgets.bottom import BottomPanel
 from surftp.widgets.connect import ConnectDialog, ConnectRequest, ProfileListScreen
+from surftp.widgets.connections import ConnectionPanel
 from surftp.widgets.dialogs import (
     ConflictScreen,
     HostKeyScreen,
@@ -48,6 +53,7 @@ from surftp.widgets.dialogs import (
     SecretPromptScreen,
 )
 from surftp.widgets.sessions import SessionTabs
+from surftp.widgets.ssh_screens import ForwardsScreen, RunCommandScreen
 from surftp.widgets.terminal import TerminalView
 from surftp.widgets.transfers import TransferPanel
 
@@ -77,8 +83,12 @@ class SurfFTPApp(App[None]):
         self._focus_intent: Widget | None = None
         self._current_engine: TransferEngine | None = None
         # Shells we have opened, keyed by the session pane's id, so the child
-        # process can be killed when the tab closes or the app exits.
+        # process can be killed when the tab closes or the app exits. SSH-only
+        # sessions (no pane) are keyed by ``ssh-<session id>``.
         self._shells: dict[str, ShellSession] = {}
+        # SSH sessions whose tab we opened but that own no file pane; keyed by
+        # the same ``ssh-<session id>`` keys as ``_shells``.
+        self._ssh_sessions: dict[str, RemoteConnection] = {}
 
     def compose(self) -> ComposeResult:
         """Yield the layout: header, two session tab groups, bottom panel, footer."""
@@ -203,6 +213,11 @@ class SurfFTPApp(App[None]):
     async def close_everything(self) -> None:
         """Tear down connections and lock the vault before the process ends."""
         await self.close_all_sessions()
+        # SSH sessions that own no pane (terminals, tunnels) are not walked by
+        # close_all_sessions; the manager closes them. The credential cache is
+        # plaintext and its lifetime ends here.
+        await get_manager().close_all()
+        get_credential_cache().clear()
         if self._vault is not None:
             self._vault.close()
         self.exit()
@@ -218,6 +233,7 @@ class SurfFTPApp(App[None]):
         for shell in list(self._shells.values()):
             await shell.close()
         self._shells.clear()
+        self._ssh_sessions.clear()
         for sessions in (self._sessions_or_none("#left-sessions"),
                          self._sessions_or_none("#right-sessions")):
             if sessions is None:
@@ -272,6 +288,9 @@ class SurfFTPApp(App[None]):
         """Forget the master password, so stored secrets need it again."""
         if self._vault is not None:
             self._vault.lock()
+            # A locked vault must mean "forget everything": the in-memory
+            # credential cache holds plaintext and dies with the vault's DEK.
+            get_credential_cache().clear()
             self.notify("Vault locked.")
 
     # ------------------------------------------------------------------
@@ -303,7 +322,7 @@ class SurfFTPApp(App[None]):
         if request.save_to_vault and vault is not None:
             profile = await self.persist_profile(vault, profile, request)
 
-        await self.connect_profile(profile, vault, request.credential)
+        await self.connect_profile(profile, vault, request.credential, open_shell=request.open_shell)
 
     async def persist_profile(
         self, vault: Vault, profile: ConnectionProfile, request: ConnectRequest
@@ -319,7 +338,13 @@ class SurfFTPApp(App[None]):
         if request.credential.password:
             vault.put_secret(profile_id, SecretKind.PASSWORD, request.credential.password)
         if request.credential.key_passphrase:
+            # Written both to the single-key row (legacy) and the indexed row
+            # for identity file 0, so both resolution paths find it.
             vault.put_secret(profile_id, SecretKind.KEY_PASSPHRASE, request.credential.key_passphrase)
+            vault.put_secret(profile_id, key_passphrase_kind(0), request.credential.key_passphrase)
+        for index, passphrase in enumerate(request.credential.key_passphrases):
+            if passphrase:
+                vault.put_secret(profile_id, key_passphrase_kind(index), passphrase)
         if saved.auth_method is AuthMethod.PEM_STORED and saved.pem_path:
             try:
                 key_text = Path(saved.pem_path).read_text(encoding="utf-8")
@@ -376,6 +401,7 @@ class SurfFTPApp(App[None]):
         profile: ConnectionProfile,
         vault: Vault | None,
         typed: Credential | None,
+        open_shell: bool = True,
     ) -> None:
         """Resolve credentials, open the connection, and open a new session tab.
 
@@ -390,7 +416,7 @@ class SurfFTPApp(App[None]):
             connection = await open_connection(profile, credential)
         except HostKeyUnknown as unknown:
             if await self.offer_host_key(unknown):
-                await self.connect_profile(profile, vault, typed)  # retry, now trusted
+                await self.connect_profile(profile, vault, typed, open_shell=open_shell)  # retry, now trusted
             else:
                 pane.border_subtitle = "Connection cancelled: host key not trusted."
             return
@@ -399,10 +425,23 @@ class SurfFTPApp(App[None]):
             self.notify(str(exc), severity="error", timeout=10)
             return
 
-        await self.attach(connection, vault)
+        await self.attach(connection, vault, open_shell=open_shell)
 
-    async def attach(self, connection: RemoteConnection, vault: Vault | None) -> None:
-        """Open a new session tab for the connection and record the successful use."""
+    async def attach(
+        self,
+        connection: RemoteConnection,
+        vault: Vault | None,
+        *,
+        open_shell: bool = True,
+    ) -> None:
+        """Open a session tab for the connection and record the successful use.
+
+        An SSH-profile connection has no pane backend; it opens a terminal tab
+        in the bottom panel instead and is listed on the Connections tab.
+        """
+        if connection.is_ssh_session:
+            await self.attach_ssh(connection, vault, open_shell=open_shell)
+            return
         # Determine which side to open the tab on
         sessions = self.left_sessions if self.active_pane is self.left_pane else self.right_sessions
         try:
@@ -413,6 +452,7 @@ class SurfFTPApp(App[None]):
             return
         if vault is not None and connection.profile.id is not None:
             vault.touch_profile(connection.profile.id)
+        self._refresh_connections_panel()
         self.notify(f"Connected to {connection.profile.display}")
 
     async def offer_host_key(self, unknown: HostKeyUnknown) -> bool:
@@ -429,6 +469,197 @@ class SurfFTPApp(App[None]):
     async def ask_secret(self, prompt: str) -> str | None:
         """Prompt for a secret at connect time; the ``ask_secret`` hook for ``net``."""
         return await self.push_screen_wait(SecretPromptScreen(prompt))
+
+    # ------------------------------------------------------------------
+    # SSH sessions (no file pane: a terminal, a tunnel, or a command)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _ssh_key(session) -> str:
+        """The ``_shells``/``_ssh_sessions`` key for an SSH-only session."""
+        return f"ssh-{id(session)}"
+
+    async def attach_ssh(
+        self,
+        connection: RemoteConnection,
+        vault: Vault | None,
+        open_shell: bool,
+    ) -> None:
+        """Open an SSH session's terminal tab and list it on the Connections tab.
+
+        An SSH profile owns no file pane; its connection is the whole point, so
+        the connection manager keeps a reference for as long as the session
+        lives. The terminal tab (or, with a ``remote_command``, the command's
+        output) is where the user lands, and the Connections tab is where the
+        session is managed.
+        """
+        session = connection.session
+        assert session is not None
+        profile = connection.profile
+        key = self._ssh_key(session)
+        label = profile.name if profile.name else profile.display
+        self._ssh_sessions[key] = connection
+
+        if profile.remote_command and not open_shell:
+            # A stored remote command runs regardless of the shell toggle; the
+            # toggle controls whether an interactive shell tab also opens.
+            await self._open_ssh_shell(session, label, command=profile.remote_command)
+        elif open_shell:
+            await self._open_ssh_shell(
+                session, label, command=profile.remote_command, pty=profile.request_pty
+            )
+
+        # Start the profile's auto-start forwards after authentication.
+        if vault is not None and profile.id is not None and vault.is_unlocked:
+            specs = vault.list_forwards(profile.id)
+            failed = await session.start_auto_forwards(specs)
+            for handle in failed:
+                if handle.state == "failed":
+                    self.notify(
+                        f"Forward {handle.spec.description} failed: {handle.error}",
+                        severity="warning",
+                    )
+        elif profile.id is not None:
+            # Forward definitions live in the vault; if it is locked we simply
+            # do not auto-start anything rather than block the connection.
+            self.notify("Vault locked — auto-start forwards were not started.", severity="warning")
+
+        if vault is not None and profile.id is not None:
+            vault.touch_profile(profile.id)
+        self._refresh_connections_panel()
+        self.notify(f"Connected to {profile.display}")
+
+    async def _open_ssh_shell(
+        self,
+        session,
+        label: str,
+        *,
+        command: str | None = None,
+        pty: bool = True,
+    ) -> None:
+        """Open one terminal tab on an SSH-only session, reusing the shell machinery."""
+        key = self._ssh_key(session)
+        if key in self._shells:
+            return  # one terminal per session; the tab is already open
+        view = TerminalView(id=f"view-{key}")
+        try:
+            shell = await ShellSession.start(
+                session,
+                cols=80,
+                rows=24,
+                command=command,
+                request_pty=pty,
+            )
+        except Exception as exc:
+            self.notify(f"Could not open a shell: {exc}", severity="error", timeout=10)
+            return
+        self._shells[key] = shell
+        view.shell = shell
+        tab_id = self.bottom_panel.add_shell(shell, label)
+        self._read_shell(shell, view, tab_id, key)
+
+    async def browse_sftp(self, session) -> None:
+        """Open an SFTP pane on an existing SSH session ("browse this host").
+
+        The reverse of today's flow: the connection already exists, so this
+        creates the file pane lazily on it. The pane is granted its own
+        reference so closing it does not take the SSH session down with it.
+        """
+        try:
+            get_manager().retain(session)
+            profile = session.profile
+            filesystem = await session.start_sftp()
+            path = await filesystem.realpath(profile.remote_path or ".")
+        except Exception as exc:
+            self.notify(f"Could not open SFTP on {session.profile.display}: {exc}", severity="error")
+            return
+        connection = RemoteConnection(profile, filesystem, path, session)
+        await self.attach(connection, self._vault)
+
+    def _refresh_connections_panel(self) -> None:
+        """Re-render the Connections tab from the manager's live sessions."""
+        try:
+            self.bottom_panel.connections.refresh_connections(get_manager().sessions())
+        except Exception:
+            pass  # panel not mounted yet; harmless
+
+    def _save_forward(self, profile_id: int, spec) -> int:
+        """Persist one forward definition to the vault; the ForwardsScreen's on_save hook."""
+        if self._vault is None or not self._vault.is_unlocked:
+            return spec.id or 0
+        return self._vault.save_forward(profile_id, spec)
+
+    def _delete_forward(self, forward_id: int) -> None:
+        """Remove one forward definition from the vault."""
+        if self._vault is not None and self._vault.is_unlocked:
+            self._vault.delete_forward(forward_id)
+
+    def on_connection_panel_shell_requested(
+        self, message: ConnectionPanel.ShellRequested
+    ) -> None:
+        """Open a terminal tab on the highlighted SSH session."""
+        session = message.session
+        label = session.profile.name or session.profile.display
+        self._open_ssh_shell_worker(session, label)
+
+    @work(exclusive=False)
+    async def _open_ssh_shell_worker(self, session, label) -> None:
+        """Worker wrapper around the shell-open coroutine for panel actions."""
+        await self._open_ssh_shell(session, label)
+
+    @work(exclusive=False)
+    async def on_connection_panel_command_requested(
+        self, message: ConnectionPanel.CommandRequested
+    ) -> None:
+        """Open the run-command view for the highlighted SSH session."""
+        await self.push_screen_wait(RunCommandScreen(message.session))
+
+    @work(exclusive=False)
+    async def on_connection_panel_browse_requested(
+        self, message: ConnectionPanel.BrowseRequested
+    ) -> None:
+        """Browse the highlighted session's SFTP from its existing connection."""
+        await self.browse_sftp(message.session)
+
+    @work(exclusive=False)
+    async def on_connection_panel_forwards_requested(
+        self, message: ConnectionPanel.ForwardsRequested
+    ) -> None:
+        """Open the forwards editor for the highlighted SSH session."""
+        session = message.session
+        specs: list = []
+        if self._vault is not None and session.profile.id is not None and self._vault.is_unlocked:
+            specs = self._vault.list_forwards(session.profile.id)
+        await self.push_screen_wait(
+            ForwardsScreen(
+                session,
+                specs,
+                on_save=lambda spec: self._save_forward(session.profile.id, spec),
+                on_delete=self._delete_forward,
+            )
+        )
+
+    @work(exclusive=False)
+    async def on_connection_panel_disconnect_requested(
+        self, message: ConnectionPanel.DisconnectRequested
+    ) -> None:
+        """Close the terminal tab and release the highlighted session's connection."""
+        await self.disconnect_ssh(message.session)
+
+    async def disconnect_ssh(self, session) -> None:
+        """Close an SSH session's terminal and release its connection reference.
+
+        The connection closes only when nothing else holds it — an SFTP pane
+        opened on the same session keeps it alive.
+        """
+        key = self._ssh_key(session)
+        self._ssh_sessions.pop(key, None)
+        await self.close_shell(key)
+        profile = session.profile
+        get_credential_cache().drop(profile)
+        await get_manager().release(session)
+        self._refresh_connections_panel()
+        self.notify(f"Disconnected from {profile.display}")
 
     def action_disconnect(self) -> None:
         """Close the active session tab (disconnects it)."""
@@ -453,10 +684,14 @@ class SurfFTPApp(App[None]):
         pane = sessions.active_pane
         label = pane.filesystem.label
         pane_id = pane.id or ""
+        connection = pane.connection  # capture before close clears it
         closed = await sessions.close_active_session()
         if closed:
-            # Kill the shell for the closed tab, if one was open.
+            # Kill the shell for the closed tab, if one was open, and forget
+            # any one-off secret cached for its profile.
             await self.close_shell(pane_id)
+            if connection is not None:
+                get_credential_cache().drop(connection.profile)
             self.notify(f"Disconnected from {label}")
         else:
             self.notify("Failed to close session tab.", severity="error")
@@ -503,7 +738,7 @@ class SurfFTPApp(App[None]):
         # The planner handles creating the directory/file inside it.
         dest_path = dest_pane.path
 
-        items = await plan_transfer(source_fs, source_path, dest_path, entries=[entry])
+        items = await plan_transfer(source_fs, source_path, dest_fs, dest_path, entries=[entry])
         if not items:
             self.notify("Nothing to transfer.")
             return
@@ -512,7 +747,7 @@ class SurfFTPApp(App[None]):
         panel = self.transfer_panel
         panel.start_job(total_bytes)
         for item in items:
-            name = posixpath.basename(item.source_path)
+            name = display_name(item.source_path)
             panel.add_item(item.source_path, name if not item.is_directory else f"{name}/", item.size)
         panel.visible = True
 
@@ -549,10 +784,8 @@ class SurfFTPApp(App[None]):
     async def _resolve_conflict(self, item) -> ConflictPolicy:
         """Push the conflict dialog and return the user's choice."""
         import asyncio
-        import posixpath
-
         future: asyncio.Future[ConflictPolicy] = asyncio.get_event_loop().create_future()
-        name = posixpath.basename(item.source_path)
+        name = display_name(item.source_path)
 
         def on_dismiss(policy: ConflictPolicy | None) -> None:
             if not future.done():
@@ -621,6 +854,16 @@ class SurfFTPApp(App[None]):
         self.active_pane.focus_table()
         self.bottom_panel.visible = True
 
+    def action_connections(self) -> None:
+        """Open the live-connections panel and refresh its rows."""
+        self.bottom_panel.active = "connections"
+        self._refresh_connections_panel()
+
+    def on_tabbed_content_tab_activated(self, event) -> None:
+        """Refresh the connections list whenever its tab is opened."""
+        if event.tabbed_content.id == "bottom" and event.pane.id == "connections":
+            self._refresh_connections_panel()
+
     def action_open_shell(self) -> None:
         """Open an interactive shell on the active session tab's connection."""
         self.shell_flow()
@@ -678,8 +921,20 @@ class SurfFTPApp(App[None]):
             message = shell.next_message(timeout=0.1)
             if message is None:
                 continue
-            self.call_from_thread(view.set_frame, message)
+            self.call_from_thread(self._set_shell_frame, tab_id, view, message)
         # Shell ended; the tab stays until dismissed, showing a stale frame.
+
+    def _set_shell_frame(self, tab_id: str, fallback: TerminalView, message: dict) -> None:
+        """Paint a frame onto the *displayed* terminal view for a shell tab.
+
+        ``add_shell`` builds its own ``TerminalView`` inside the bottom panel;
+        the view handed to ``_read_shell`` is only a fallback for the moment
+        before that tab's pane is mounted. Painting the wrong view would show a
+        permanently blank terminal.
+        """
+        displayed = self.bottom_panel.view_for(tab_id)
+        target = displayed or fallback
+        target.set_frame(message)
 
     async def close_shell(self, pane_id: str) -> None:
         """Close and kill the shell for a session pane, if one is open."""
@@ -754,17 +1009,3 @@ class SurfFTPApp(App[None]):
         """Jump to session tab 9."""
         sessions = self.left_sessions if self.active_pane is self.left_pane else self.right_sessions
         sessions.activate(8)
-
-
-def _join_dest_path(base: str, name: str) -> str:
-    """Join ``base`` and ``name`` using the appropriate path separator.
-
-    If ``base`` looks like a Windows path (contains ``:\\``), use ``os.path``;
-    otherwise use ``posixpath``. This is a heuristic — the engine does not
-    know the destination's OS, so it guesses from the path syntax.
-    """
-    if ":\\" in base or base.startswith("\\\\"):
-        import os.path
-
-        return os.path.join(base, name)
-    return posixpath.join(base, name)

@@ -1,9 +1,10 @@
-"""The tabbed bottom panel: Transfers | Shell: <session> | …
+"""The tabbed bottom panel: Transfers | Connections | Shell: <session> | …
 
 Replaces the bare ``TransferPanel`` with a ``TabbedContent`` whose first tab is
-the (unchanged) transfer monitor and whose remaining tabs are one per open
-shell. The transfers tab keeps its own ``ctrl+t`` toggle; the shell tabs are
-added/removed as shells open and close.
+the (unchanged) transfer monitor, whose second is the live-connections panel
+(see ``connections.py``), and whose remaining tabs are one per open shell. The
+transfers tab keeps its own ``ctrl+t`` toggle; the shell tabs are added/removed
+as shells open and close.
 
 The panel owns no emulator state — each shell tab hosts a ``TerminalView``
 that displays frames from the ``ShellSession`` in ``surftp.shell``.
@@ -21,6 +22,7 @@ from textual.reactive import reactive
 from textual.widgets import TabbedContent, TabPane
 
 from surftp.shell.session import ShellSession
+from surftp.widgets.connections import ConnectionPanel
 from surftp.widgets.terminal import TerminalView
 from surftp.widgets.transfers import TransferPanel
 
@@ -34,19 +36,22 @@ class BottomPanel(TabbedContent):
     visible: reactive[bool] = reactive(True)
 
     def __init__(self, *args, **kwargs) -> None:
-        """Create the bottom panel with a transfers tab."""
+        """Create the bottom panel with transfers and connections tabs."""
         super().__init__(*args, **kwargs)
         self._transfers: TransferPanel | None = None
+        self._connections: ConnectionPanel | None = None
         self._shell_views: dict[str, TerminalView] = {}  # shell tab id -> view
 
     def on_mount(self) -> None:
-        """Add the transfers tab and make the tab bar non-focusable."""
+        """Add the transfers and connections tabs and make the tab bar non-focusable."""
         transfers = TransferPanel(id="transfer-content")
         self.add_pane(TabPane("Transfers", transfers, id="transfers"))
+        connections = ConnectionPanel(id="connections-content")
+        self.add_pane(TabPane("Connections", connections, id="connections"))
         self.active = "transfers"
-        # The TransferPanel's own on_mount has not run yet, so its table does
-        # not exist; capture the reference after a refresh instead.
-        self.call_after_refresh(self._grab_transfers)
+        # The panels' own on_mount has not run yet, so their tables do not
+        # exist; capture the references after a refresh instead.
+        self.call_after_refresh(self._grab_panels)
         # The Tabs widget appears as panes are added; make it non-focusable so
         # shell keys reach the terminal. Retry after refresh if not up yet.
         self.call_after_refresh(self._disable_tab_focus)
@@ -60,18 +65,28 @@ class BottomPanel(TabbedContent):
             return
         tabs.can_focus = False
 
-    def _grab_transfers(self) -> None:
-        """Capture the transfers panel reference for the app."""
+    def _grab_panels(self) -> None:
+        """Capture the transfers and connections panel references for the app."""
         try:
             self._transfers = self.query_one("#transfer-content", TransferPanel)
         except Exception:
             self._transfers = None
+        try:
+            self._connections = self.query_one("#connections-content", ConnectionPanel)
+        except Exception:
+            self._connections = None
 
     @property
     def transfers(self) -> TransferPanel:
         """The transfers monitor tab."""
         assert self._transfers is not None, "BottomPanel not mounted yet"
         return self._transfers
+
+    @property
+    def connections(self) -> ConnectionPanel:
+        """The live-connections tab."""
+        assert self._connections is not None, "BottomPanel not mounted yet"
+        return self._connections
 
     def _on_tab_pane_focused(self, event: TabPane.Focused) -> None:
         """Ignore ``TabPane.Focused`` events entirely.

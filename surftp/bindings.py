@@ -72,10 +72,12 @@ BINDINGS: list[Binding] = [
             tooltip="Jump to session tab 9"),
     Binding("ctrl+l", "lock_vault", "Lock", show=False,
             tooltip="Lock the credential vault, forgetting the master password"),
-    Binding("f10", "focus_panes", "Panes", show=False,
+    Binding("f10", "focus_panes", "Panes", show=False, priority=True,
             tooltip="Return focus to the file panes (escape hatch from a shell)"),
     Binding("ctrl+enter", "open_shell", "Shell", show=True,
             tooltip="Open an interactive shell on the focused session tab"),
+    Binding("f11", "connections", "Connections", show=True,
+            tooltip="Show the live SSH connections panel"),
     Binding("ctrl+q", "quit", "Quit", show=True,
             tooltip="Exit SURFTP"),
 ]

@@ -14,7 +14,7 @@ from datetime import datetime
 
 import aioftp
 
-from surftp.fs.types import FileEntry, FileSystemError, sort_entries
+from surftp.fs.types import FileEntry, FileSystemError, remote_join, sort_entries
 from surftp.net.types import ConnectionProfile, Credential, NetworkError
 
 CONNECT_TIMEOUT_SECONDS: int = 15
@@ -123,6 +123,10 @@ class FTPFileSystem:
                 FileEntry(name="..", path=await self.parent_of(path), is_dir=True, size=0, modified=0.0),
             )
         return entries
+
+    def join_path(self, base: str, name: str) -> str:
+        """Join a remote path using FTP's POSIX wire rules. See ``remote_join``."""
+        return remote_join(base, name)
 
     async def parent_of(self, path: str) -> str:
         """Return the parent of a remote path, using POSIX rules."""

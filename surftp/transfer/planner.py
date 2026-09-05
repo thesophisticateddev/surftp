@@ -12,7 +12,6 @@ listed in the order they were encountered (depth-first).
 
 from __future__ import annotations
 
-import posixpath
 
 from surftp.fs.types import FileEntry, FileSystem, FileSystemError
 from surftp.transfer.types import TransferItem
@@ -21,6 +20,7 @@ from surftp.transfer.types import TransferItem
 async def plan_transfer(
     source: FileSystem,
     source_path: str,
+    destination: FileSystem,
     destination_path: str,
     entries: list[FileEntry] | None = None,
 ) -> list[TransferItem]:
@@ -32,6 +32,11 @@ async def plan_transfer(
 
     Directories are yielded before their contents, in depth order. The returned
     list is ready to hand to the engine: directories first, then files.
+
+    ``destination`` is taken purely to build destination paths with
+    ``destination.join_path``. The planner used to guess the destination's path
+    syntax from the string it was handed; the backend already knows it, so it is
+    asked instead. Nothing here reads or writes through ``destination``.
     """
     items: list[TransferItem] = []
     if entries is None:
@@ -44,26 +49,12 @@ async def plan_transfer(
         if entry.name == "..":
             continue
         src = entry.path
-        dst = _join_path(destination_path, entry.name)
+        dst = destination.join_path(destination_path, entry.name)
         if entry.is_dir:
             items.append(TransferItem(src, dst, size=0, is_directory=True))
-            sub_items = await plan_transfer(source, src, dst)
+            sub_items = await plan_transfer(source, src, destination, dst)
             items.extend(sub_items)
         else:
             items.append(TransferItem(src, dst, size=entry.size, is_directory=False))
 
     return items
-
-
-def _join_path(base: str, name: str) -> str:
-    """Join ``base`` and ``name`` using the appropriate path separator.
-
-    If ``base`` looks like a Windows path (contains ``:\\``), use ``os.path``;
-    otherwise use ``posixpath``. This is a heuristic — the engine does not
-    know the destination's OS, so it guesses from the path syntax.
-    """
-    if ":\\" in base or base.startswith("\\\\"):
-        import os.path
-
-        return os.path.join(base, name)
-    return posixpath.join(base, name)

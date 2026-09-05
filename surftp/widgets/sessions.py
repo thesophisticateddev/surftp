@@ -115,6 +115,12 @@ class SessionTabs(Vertical):
 
         assert self._tabbed is not None
         profile = connection.profile
+        # An SSH profile has no pane backend; its terminal lives in the bottom
+        # panel, so a pane must never be asked to render one.
+        if connection.filesystem is None:
+            raise ValueError(
+                "An SSH profile has no file pane — open its shell from the Connections panel."
+            )
         label = profile.name if profile.name else profile.display
         # Truncate long labels to prevent tab bar scrolling
         if len(label) > 18:
