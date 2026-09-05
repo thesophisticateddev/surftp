@@ -18,6 +18,7 @@ class Protocol(StrEnum):
     SFTP = "sftp"
     SCP = "scp"
     FTP = "ftp"
+    SSH = "ssh"
 
 
 class AuthMethod(StrEnum):
@@ -37,11 +38,36 @@ class SecretKind(StrEnum):
     PRIVATE_KEY = "private_key"
 
 
+class ForwardKind(StrEnum):
+    """The four kinds of port forward an SSH connection can carry.
+
+    ``socket`` is the Unix-socket local forward (``ssh -L`` with a socket
+    path), useful for reaching a remote Docker socket.
+    """
+
+    LOCAL = "local"
+    REMOTE = "remote"
+    DYNAMIC = "dynamic"
+    SOCKET = "socket"
+
+
 DEFAULT_PORTS: dict[Protocol, int] = {
     Protocol.SFTP: 22,
     Protocol.SCP: 22,
     Protocol.FTP: 21,
+    Protocol.SSH: 22,
 }
+
+
+def key_passphrase_kind(index: int) -> str:
+    """Return the vault secret kind for one identity file's passphrase.
+
+    Multiple identity files must not share one passphrase record, so the kind
+    is ``key_passphrase:<index>`` mirroring the order of ``identity_files``.
+    Index 0 is the same row that the legacy ``SecretKind.KEY_PASSPHRASE``
+    writes, so a single-key profile saved before this feature still resolves.
+    """
+    return f"{SecretKind.KEY_PASSPHRASE}:{index}"
 
 
 class NetworkError(Exception):
@@ -52,7 +78,11 @@ class NetworkError(Exception):
     see ``surftp.net.errors``. A bare "connection failed" is the failure mode
     that makes a client like this unusable.
     """
-
+class OpenConnectionError(Exception):
+    """This exception is dedicated to opening connection error exceptions 
+    The error could originate due to network, io, socket, DNS or 
+    any other issues.
+    """
 
 class HostKeyChanged(NetworkError):
     """The host presented a different key than the one in known_hosts.
@@ -93,11 +123,30 @@ class ConnectionProfile:
     remote_path: str | None = None
     use_tls: bool = False  # FTPS; ignored for SSH-based protocols
     id: int | None = None
+    # --- SSH-as-a-protocol fields (ignored for FTP; meaningful for SSH/SFTP/SCP)
+    identity_files: tuple[str, ...] = ()  # ordered, like repeated ssh -i
+    jump_host: str | None = None  # ProxyJump, "user@host:port"
+    remote_command: str | None = None  # run instead of a login shell
+    keepalive_interval: int = 30
+    compression: bool = False
+    agent_forwarding: bool = False  # off by default; see the security notes
+    request_pty: bool = True
+    dedicated_connection: bool = True  # SSH profiles own their connection
 
     def __post_init__(self) -> None:
-        """Fill in the protocol's default port when none was given."""
+        """Fill in the protocol's default port when none was given.
+
+        ``dedicated_connection`` defaults to ``True`` for SSH profiles, which
+        is the whole point of the plan; SFTP/SCP/FTP profiles default to
+        ``False`` so the historic "one connection, many channels" behaviour is
+        preserved exactly. The override cannot live in the field default
+        because the default is the same for every profile, so it is applied
+        here from the protocol.
+        """
         if not self.port:
             object.__setattr__(self, "port", DEFAULT_PORTS[self.protocol])
+        if self.protocol is not Protocol.SSH:
+            object.__setattr__(self, "dedicated_connection", False)
 
     @property
     def display(self) -> str:
@@ -107,11 +156,57 @@ class ConnectionProfile:
     @property
     def is_ssh(self) -> bool:
         """Whether this profile is reached over SSH (SFTP and SCP both are)."""
-        return self.protocol in (Protocol.SFTP, Protocol.SCP)
+        return self.protocol in (Protocol.SFTP, Protocol.SCP, Protocol.SSH)
+
+    @property
+    def key_paths(self) -> tuple[str, ...]:
+        """The ordered list of identity-file paths, ``pem_path`` first.
+
+        ``pem_path`` is the single-key form kept for backward compatibility;
+        ``identity_files`` is the general form. ``pem_path`` is treated as the
+        first element when set, exactly as the plan requires.
+        """
+        if self.identity_files:
+            return self.identity_files
+        if self.pem_path:
+            return (self.pem_path,)
+        return ()
 
     def with_id(self, profile_id: int) -> ConnectionProfile:
         """Return a copy carrying the id assigned by the vault on save."""
         return replace(self, id=profile_id)
+
+
+@dataclass(frozen=True, slots=True)
+class ForwardSpec:
+    """One port forward a profile can carry; rows in the vault's ``forwards`` table.
+
+    ``listen_host`` defaults to ``127.0.0.1`` — a local forward or SOCKS proxy
+    bound to ``0.0.0.0`` turns the user's machine into an open relay into the
+    remote network, so binding elsewhere is possible but never a default.
+
+    ``socket`` forwards carry the two Unix socket paths instead of
+    host/port pairs (``ssh -L /local.sock:/remote.sock``).
+    """
+
+    id: int | None = None
+    kind: ForwardKind = ForwardKind.LOCAL
+    listen_host: str = "127.0.0.1"
+    listen_port: int = 0
+    dest_host: str | None = None
+    dest_port: int | None = None
+    listen_path: str | None = None  # kind == SOCKET
+    dest_path: str | None = None  # kind == SOCKET
+    auto_start: bool = True
+
+    @property
+    def description(self) -> str:
+        """Render the forward as ``listen -> dest``, the shape ``ssh -L`` shows."""
+        if self.kind is ForwardKind.SOCKET:
+            return f"{self.listen_path} -> {self.dest_path}"
+        if self.kind is ForwardKind.DYNAMIC:
+            return f"{self.listen_host}:{self.listen_port} (SOCKS)"
+        return f"{self.listen_host}:{self.listen_port} -> {self.dest_host}:{self.dest_port}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,16 +221,27 @@ class Credential:
     password: str | None = None
     key_passphrase: str | None = None
     private_key_data: str | None = None  # PEM text, for AuthMethod.PEM_STORED
+    key_passphrases: tuple[str | None, ...] = ()  # per identity file, by index
+
+    def passphrase_for(self, index: int) -> str | None:
+        """Return the passphrase for one identity file, falling back to the single form."""
+        if index < len(self.key_passphrases) and self.key_passphrases[index] is not None:
+            return self.key_passphrases[index]
+        if index == 0:
+            return self.key_passphrase
+        return None
 
     def __repr__(self) -> str:
         """Redacted repr, so a stray log line or traceback cannot leak a secret."""
-        fields = [
-            f"{name}=<set>"
+        present = [
+            name
             for name, value in (
                 ("password", self.password),
                 ("key_passphrase", self.key_passphrase),
                 ("private_key_data", self.private_key_data),
+                ("key_passphrases", self.key_passphrases),
             )
             if value
         ]
-        return f"Credential({', '.join(fields) if fields else 'empty'})"
+        fields = [f"{name}=<set>" for name in present] or ["empty"]
+        return f"Credential({', '.join(fields)})"

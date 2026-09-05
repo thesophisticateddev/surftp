@@ -41,6 +41,7 @@ class ConnectRequest:
     profile: ConnectionProfile
     credential: Credential
     save_to_vault: bool
+    open_shell: bool = True  # SSH profiles: open a terminal tab on connect
 
 
 class ConnectDialog(ModalScreen[ConnectRequest | None]):
@@ -78,6 +79,24 @@ class ConnectDialog(ModalScreen[ConnectRequest | None]):
                     value=(p.remote_path or "") if p else "",
                     id="remote_path",
                 )
+                yield Input(
+                    placeholder="identity files (comma-separated)",
+                    value=",".join(p.identity_files) if p and p.identity_files else "",
+                    id="identity_files",
+                    classes="hidden",
+                )
+                yield Input(
+                    placeholder="jump host  [user@]host[:port]",
+                    value=(p.jump_host or "") if p else "",
+                    id="jump_host",
+                    classes="hidden",
+                )
+            yield Checkbox(
+                "Open a shell on connect",
+                value=True,
+                id="open_shell",
+                classes="hidden",
+            )
             yield Select(
                 [
                     ("Password", AuthMethod.PASSWORD.value),
@@ -148,10 +167,17 @@ class ConnectDialog(ModalScreen[ConnectRequest | None]):
             self.query_one("#auth_method", Select).value = AuthMethod.PASSWORD.value
             method = AuthMethod.PASSWORD
 
+        is_ssh = protocol is Protocol.SSH
         self._set_visible("#password", method is AuthMethod.PASSWORD)
         self._set_visible("#pem_path", method is AuthMethod.PEM_FILE)
         self._set_visible("#passphrase", method in (AuthMethod.PEM_FILE, AuthMethod.PEM_STORED))
         self._set_visible("#use_tls", protocol is Protocol.FTP)
+        # SSH profiles have no pane backend, so the remote path is meaningless;
+        # instead they carry identities, a jump host and a shell toggle.
+        self._set_visible("#remote_path", not is_ssh)
+        self._set_visible("#identity_files", is_ssh and method is AuthMethod.PEM_FILE)
+        self._set_visible("#jump_host", is_ssh)
+        self._set_visible("#open_shell", is_ssh)
 
         self.query_one("#notice", Static).update(self._notice(protocol, method))
 
@@ -166,6 +192,11 @@ class ConnectDialog(ModalScreen[ConnectRequest | None]):
             return (
                 "SCP transfers files but cannot list directories, so this pane browses over SFTP "
                 "on the same connection. It will not work if the server has SFTP disabled."
+            )
+        if protocol is Protocol.SSH and method is AuthMethod.PEM_FILE:
+            return (
+                "Identity files are read from disk; they are never copied into the vault. "
+                "Each file is tried in order, like repeated ssh -i."
             )
         if method is AuthMethod.PEM_STORED:
             return "The key file's contents will be copied into the vault and encrypted there."
@@ -206,8 +237,15 @@ class ConnectDialog(ModalScreen[ConnectRequest | None]):
         method = AuthMethod(str(self.query_one("#auth_method", Select).value))
         pem_path = self.query_one("#pem_path", Input).value.strip() or None
         if method in (AuthMethod.PEM_FILE, AuthMethod.PEM_STORED) and not pem_path:
-            error.update("Choose a .pem private key file.")
-            return
+            if not self.query_one("#identity_files", Input).value.strip():
+                error.update("Choose a .pem private key file.")
+                return
+
+        identity_raw = self.query_one("#identity_files", Input).value.strip()
+        identity_files = tuple(
+            part.strip() for part in identity_raw.split(",") if part.strip()
+        )
+        jump_host = self.query_one("#jump_host", Input).value.strip() or None
 
         name = self.query_one("#name", Input).value.strip() or f"{username}@{host}"
         profile = ConnectionProfile(
@@ -221,6 +259,8 @@ class ConnectDialog(ModalScreen[ConnectRequest | None]):
             pem_path=pem_path,
             remote_path=self.query_one("#remote_path", Input).value.strip() or None,
             use_tls=self.query_one("#use_tls", Checkbox).value,
+            identity_files=identity_files,
+            jump_host=jump_host,
         )
         credential = Credential(
             password=self.query_one("#password", Input).value or None,
@@ -231,6 +271,7 @@ class ConnectDialog(ModalScreen[ConnectRequest | None]):
                 profile=profile,
                 credential=credential,
                 save_to_vault=self.query_one("#save", Checkbox).value,
+                open_shell=self.query_one("#open_shell", Checkbox).value,
             )
         )
 

@@ -47,6 +47,10 @@ No linter or typecheck config yet — do not invent commands; wire them up here 
 - ~~Mode column shows only `d`/`-`~~ — pane-tabs-and-permissions plan added full POSIX permissions (`drwxr-xr-x`); see `.plans/results/pane-tabs-and-permissions-2026-08-28.md`.
 - ~~Single pane per side~~ — pane-tabs-and-permissions plan added `SessionTabs` widget for multiple sessions per side.
 - ~~No interactive shell~~ — ssh-shell plan added the shell channel + emulator split; see `.plans/results/ssh-shell-2026-08-28.md`.
+- ~~No vault migration path~~ — ssh-connections plan added the v1→v2 migration (backup-first, additive, version written last) and the `forwards` table; see `.plans/results/ssh-connections-2026-09-02.md`.
+- ~~No SSH protocol~~ — ssh-connections plan made SSH first-class: `Protocol.SSH` with no pane backend (its terminal lives in the bottom panel), a reference-counted `SSHConnectionManager`, multi-key auth, jump hosts, forwards and the credential cache.
+- ~~Every connection was a fresh `SSHSession`~~ — ssh-connections plan added the manager, keyed by `(protocol, host, port, user, auth_method, identity_files)`; SFTP profiles share, SSH profiles get their own.
+- ~~`f10` could not escape a shell~~ — it was a non-priority binding, and a focused `TerminalView` stops every key before the app's non-priority bindings run; `f10` is now `priority=True` (like `ctrl+q`).
 - `docs/`, `utils/` are empty. No `pyproject.toml`, no commits on `master`.
 - Transfer engine is local-only verified; SFTP/FTP transfer paths need a live server to integration-test.
 
@@ -85,8 +89,17 @@ No linter or typecheck config yet — do not invent commands; wire them up here 
 - **Read the child pipe on a worker thread, never the event loop.** `ShellSession.next_message()` blocks; call it via `@work(thread=True)` or `asyncio.to_thread`. A blocking `recv_bytes()` on the loop freezes the drain task that feeds the SSH output to the child.
 - **`SSHReader.read(n)` waits until *n* bytes are available.** Keep the drain chunk small (4096), or a trickle of shell output stalls the whole channel.
 - **The emulator must flush dirty frames on a pipe timeout.** If a feed arrives inside the 33 ms coalescing window, the child must poll with a timeout and emit the pending frame when due — otherwise it blocks on `recv_bytes` and the terminal looks stalled.
-- **`App.check_action()` disables pane/transfer actions while a `TerminalView` is focused**, so `tab`, `ctrl+d`, `escape`, `ctrl+w`, `ctrl+pageup/pagedown` reach the shell. `f10` is the one key that always returns to the panes.
+- **`App.check_action()` disables pane/transfer actions while a `TerminalView` is focused**, so `tab`, `ctrl+d`, `escape`, `ctrl+w`, `ctrl+pageup/pagedown` reach the shell. `f10` is the one key that always returns to the panes — and it must stay a **priority binding** for that to be true (a focused terminal stops every key before non-priority bindings run).
+- **Frames must be painted on the *displayed* `TerminalView`.** `add_shell` builds its own view inside the bottom panel; `_read_shell` used to paint the throwaway view passed in from the caller, leaving a permanently blank terminal. Paint via `bottom_panel.view_for(tab_id)` and fall back to the caller's view only before the tab is mounted.
 - **A `TabbedContent` subclass must not override `compose()` to declare tabs directly.** The base `compose()` builds the `ContentTabs` widget that `add_pane`/`remove_pane` and the focus handler rely on. Add every tab via `add_pane` (in `on_mount` for the first one).
+
+## SSH connections gotchas (ssh-connections plan)
+
+- **The manager's key must include the protocol.** The plan's §4 key `(host, port, user, auth_method, identity_files)` collides for an SFTP profile and an SSH profile to the same host: the dedicated SSH connection would overwrite the shared SFTP connection's registry entry, orphaning it and leaking it. The key is `(protocol, host, port, user, auth_method, identity_files)` — same-protocol profiles still share.
+- **An SSH profile has no `FileSystem`.** `RemoteConnection.filesystem` is `None` for `Protocol.SSH`; `FilePane.attach_connection` and `SessionTabs.open_session` both refuse it. The app routes such connections to a bottom-panel terminal tab instead, and the Connections panel (`f11`) is where they are managed.
+- **The in-memory credential cache is the only plaintext store outside the vault.** It exists so a dedicated SSH connection does not prompt twice for the same profile. It is keyed by profile id (a `("temp", host, port, user, method)` key for unsaved profiles) and cleared on vault lock, on disconnect, and at exit — never persisted, never logged.
+- **DuckDB cannot run two `ALTER TABLE ... ADD COLUMN` on one table in a single transaction** ("another transaction has altered this table"), nor combine them into one statement. The migration therefore runs the column adds standalone (they are idempotent) and commits the `forwards` table + the `schema_version` bump together, last — so a crash leaves a readable v1 vault, never a half-v2 one.
+- **`fetch_host_key` leaves a connection open for a moment** after the trust prompt (asyncssh's async teardown). Harmless in the app, but a test that counts server connections must not treat it as a leak from the code under test.
 
 See `CLAUDE.md` for the longer-form version of these notes.
 

@@ -217,7 +217,16 @@ class FilePane(Static):
     # ------------------------------------------------------------------
 
     def attach_connection(self, connection: RemoteConnection) -> None:
-        """Point this pane at a live remote connection and list its initial directory."""
+        """Point this pane at a live remote connection and list its initial directory.
+
+        Refuses an SSH-profile connection: it has no filesystem (its whole
+        point is that it is not a pane), so attaching it would crash on
+        ``None``. The app routes such connections to a terminal tab instead.
+        """
+        if connection.filesystem is None:
+            raise ValueError(
+                "An SSH profile has no file pane — open its shell from the Connections panel."
+            )
         self._connection = connection
         self._filesystem = connection.filesystem
         self.path = connection.initial_path

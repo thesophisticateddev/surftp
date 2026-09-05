@@ -78,7 +78,7 @@ async def run_job(source, destination, src_path: str, dest_dir: str, policy=Conf
     """Plan and run a single-file transfer, returning (result, seen_progress)."""
     entries = [e for e in await source.list_directory(os.path.dirname(src_path))
                if e.path == src_path]
-    items = await plan_transfer(source, src_path, dest_dir, entries=entries)
+    items = await plan_transfer(source, src_path, destination, dest_dir, entries=entries)
     job = TransferJob(items=items, total_bytes=sum(i.size for i in items),
                       source_label="src", destination_label="dst")
     seen: list[tuple[str, int]] = []

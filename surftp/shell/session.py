@@ -70,13 +70,19 @@ class ShellSession:
         session: SSHSession,
         cols: int,
         rows: int,
+        *,
+        command: str | None = None,
+        request_pty: bool = True,
     ) -> ShellSession:
-        """Open a shell on ``session``'s connection and spawn the emulator child.
+        """Open a shell (or run ``command``) on ``session``'s connection and spawn the emulator child.
 
-        The child is spawned with the ``spawn`` context — ``fork`` would clone
-        the parent's asyncio loop, its open SSH sockets and the unlocked
-        vault's DEK into a second process, which is both a correctness and a
-        security problem.
+        ``command`` runs instead of a login shell — the profile's
+        ``remote_command``. It is started without a PTY unless ``request_pty``
+        is set, matching ``ssh host cmd`` more closely (no PTY means no
+        terminal-size negotiation for a non-interactive command). The child is
+        spawned with the ``spawn`` context — ``fork`` would clone the parent's
+        asyncio loop, its open SSH sockets and the unlocked vault's DEK into a
+        second process, which is both a correctness and a security problem.
         """
         ctx = multiprocessing.get_context("spawn")
         parent_conn, child_conn = ctx.Pipe(duplex=True)
@@ -84,11 +90,13 @@ class ShellSession:
         process.start()
         child_conn.close()  # parent only talks on parent_conn
 
-        channel = await session.connection.create_process(
-            term_type="xterm-256color",
-            term_size=(cols, rows),
-            encoding=None,  # bytes streams: the shell carries raw terminal bytes
-        )
+        kwargs: dict[str, Any] = {"encoding": None}  # bytes streams: the shell carries raw bytes
+        if command:
+            kwargs["command"] = command
+        if request_pty:
+            kwargs["term_type"] = "xterm-256color"
+            kwargs["term_size"] = (cols, rows)
+        channel = await session.connection.create_process(**kwargs)
 
         shell = cls(process, parent_conn, channel)
         shell._channel_task = asyncio.create_task(shell._drain_channel())

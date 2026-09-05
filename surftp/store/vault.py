@@ -25,10 +25,27 @@ from typing import Any
 import duckdb
 import platformdirs
 
-from surftp.net.types import AuthMethod, ConnectionProfile, Protocol, SecretKind
+from surftp.net.types import AuthMethod, ConnectionProfile, ForwardKind, ForwardSpec, Protocol, SecretKind
 from surftp.store import crypto
 from surftp.store.crypto import VaultLockedError
-from surftp.store.schema import SCHEMA_VERSION, check_schema_version, create_schema
+from surftp.store.schema import SCHEMA_VERSION, check_schema_version, create_schema, migrate
+
+# How ordered identity-file paths are packed into one VARCHAR column. The unit
+# separator is a control byte that cannot realistically appear in a key path,
+# so it cannot be confused with a separator the way a comma could be.
+_IDENTITY_SEP: str = "\x1f"
+
+
+def _encode_identity_files(paths: tuple[str, ...]) -> str | None:
+    """Serialise ordered identity-file paths for the profiles column."""
+    return _IDENTITY_SEP.join(paths) if paths else None
+
+
+def _decode_identity_files(raw: str | None) -> tuple[str, ...]:
+    """Parse identity-file paths back out of the profiles column."""
+    if not raw:
+        return ()
+    return tuple(part for part in raw.split(_IDENTITY_SEP) if part)
 
 
 def default_vault_path() -> Path:
@@ -88,12 +105,19 @@ class Vault:
 
     @classmethod
     def open(cls, path: Path) -> Vault:
-        """Open an existing vault **locked**. Call :meth:`unlock` before reading secrets."""
+        """Open an existing vault **locked**. Call :meth:`unlock` before reading secrets.
+
+        Older vaults are migrated to the current schema here, before any DDL
+        from this build runs, so the pre-migration backup is a faithful copy of
+        the file the user actually had. Migration touches no secrets and needs
+        no unlock, so opening a locked vault upgrades it quietly.
+        """
         if not path.exists():
             raise FileNotFoundError(f"No vault at {path}.")
         conn = duckdb.connect(str(path))
+        check_schema_version(conn)  # refuse a *newer* vault before touching it
+        migrate(conn, path)  # v1 -> v2: backup first, one transaction, secrets untouched
         create_schema(conn)  # tolerate a vault created by an older build
-        check_schema_version(conn)
         return cls(conn, path)
 
     @classmethod
@@ -171,10 +195,20 @@ class Vault:
             pem_path=row[7],
             remote_path=row[8],
             use_tls=bool(row[9]),
+            identity_files=_decode_identity_files(row[10]),
+            jump_host=row[11],
+            remote_command=row[12],
+            keepalive_interval=int(row[13]),
+            compression=bool(row[14]),
+            agent_forwarding=bool(row[15]),
+            request_pty=bool(row[16]),
+            dedicated_connection=bool(row[17]),
         )
 
     _PROFILE_COLUMNS = (
-        "id, name, protocol, host, port, username, auth_method, pem_path, remote_path, use_tls"
+        "id, name, protocol, host, port, username, auth_method, pem_path, remote_path, use_tls, "
+        "identity_files, jump_host, remote_command, keepalive_interval, compression, "
+        "agent_forwarding, request_pty, dedicated_connection"
     )
 
     def list_profiles(self) -> list[ConnectionProfile]:
@@ -203,8 +237,10 @@ class Vault:
         if profile.id is None:
             row = self._conn.execute(
                 "INSERT INTO profiles (name, protocol, host, port, username, auth_method, "
-                "pem_path, remote_path, use_tls, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                "pem_path, remote_path, use_tls, identity_files, jump_host, remote_command, "
+                "keepalive_interval, compression, agent_forwarding, request_pty, "
+                "dedicated_connection, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
                 [
                     profile.name,
                     str(profile.protocol),
@@ -215,6 +251,14 @@ class Vault:
                     profile.pem_path,
                     profile.remote_path,
                     profile.use_tls,
+                    _encode_identity_files(profile.identity_files),
+                    profile.jump_host,
+                    profile.remote_command,
+                    profile.keepalive_interval,
+                    profile.compression,
+                    profile.agent_forwarding,
+                    profile.request_pty,
+                    profile.dedicated_connection,
                     datetime.now(timezone.utc),
                 ],
             ).fetchone()
@@ -223,7 +267,9 @@ class Vault:
 
         self._conn.execute(
             "UPDATE profiles SET name = ?, protocol = ?, host = ?, port = ?, username = ?, "
-            "auth_method = ?, pem_path = ?, remote_path = ?, use_tls = ? WHERE id = ?",
+            "auth_method = ?, pem_path = ?, remote_path = ?, use_tls = ?, identity_files = ?, "
+            "jump_host = ?, remote_command = ?, keepalive_interval = ?, compression = ?, "
+            "agent_forwarding = ?, request_pty = ?, dedicated_connection = ? WHERE id = ?",
             [
                 profile.name,
                 str(profile.protocol),
@@ -234,17 +280,26 @@ class Vault:
                 profile.pem_path,
                 profile.remote_path,
                 profile.use_tls,
+                _encode_identity_files(profile.identity_files),
+                profile.jump_host,
+                profile.remote_command,
+                profile.keepalive_interval,
+                profile.compression,
+                profile.agent_forwarding,
+                profile.request_pty,
+                profile.dedicated_connection,
                 profile.id,
             ],
         )
         return profile.id
 
     def delete_profile(self, profile_id: int) -> None:
-        """Delete a profile and every secret belonging to it.
+        """Delete a profile, every secret belonging to it, and its forwards.
 
-        The secrets go first: a crash between the two statements must not leave
-        orphaned ciphertext behind with no profile row to explain it.
+        The secrets and forwards go first: a crash between the statements must
+        not leave orphaned rows behind with no profile row to explain them.
         """
+        self._conn.execute("DELETE FROM forwards WHERE profile_id = ?", [profile_id])
         self._conn.execute("DELETE FROM secrets WHERE profile_id = ?", [profile_id])
         self._conn.execute("DELETE FROM profiles WHERE id = ?", [profile_id])
 
@@ -259,8 +314,13 @@ class Vault:
     # Secrets (unlock required)
     # ------------------------------------------------------------------
 
-    def put_secret(self, profile_id: int, kind: SecretKind, value: str) -> None:
-        """Encrypt and store one secret, replacing any existing one of that kind."""
+    def put_secret(self, profile_id: int, kind: SecretKind | str, value: str) -> None:
+        """Encrypt and store one secret, replacing any existing one of that kind.
+
+        ``kind`` may be a ``SecretKind`` or the indexed passphrase form
+        ``"key_passphrase:<index>"`` returned by :func:`key_passphrase_kind`,
+        which is how several identity files keep separate passphrase records.
+        """
         dek = self._require_dek()
         blob = crypto.encrypt_secret(dek, value, profile_id, str(kind))
         self._conn.execute(
@@ -268,7 +328,7 @@ class Vault:
         )
         self._conn.execute("INSERT INTO secrets VALUES (?, ?, ?)", [profile_id, str(kind), blob])
 
-    def get_secret(self, profile_id: int, kind: SecretKind) -> str | None:
+    def get_secret(self, profile_id: int, kind: SecretKind | str) -> str | None:
         """Return a decrypted secret, or ``None`` when the profile has none of that kind.
 
         Raises ``VaultLockedError`` when locked — ``None`` means "not stored",
@@ -283,11 +343,99 @@ class Vault:
             return None
         return crypto.decrypt_secret(dek, bytes(row[0]), profile_id, str(kind))
 
-    def delete_secret(self, profile_id: int, kind: SecretKind) -> None:
+    def delete_secret(self, profile_id: int, kind: SecretKind | str) -> None:
         """Remove one stored secret. Allowed while locked — deleting reveals nothing."""
         self._conn.execute(
             "DELETE FROM secrets WHERE profile_id = ? AND kind = ?", [profile_id, str(kind)]
         )
+
+    # ------------------------------------------------------------------
+    # Forwards (no unlock required — they hold no secrets)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _row_to_forward(row: tuple[Any, ...]) -> ForwardSpec:
+        """Build a ``ForwardSpec`` from a ``forwards`` row."""
+        return ForwardSpec(
+            id=int(row[0]),
+            kind=ForwardKind(row[2]),
+            listen_host=str(row[3]),
+            listen_port=int(row[4]),
+            dest_host=row[5],
+            dest_port=int(row[6]) if row[6] is not None else None,
+            listen_path=row[7],
+            dest_path=row[8],
+            auto_start=bool(row[9]),
+        )
+
+    _FORWARD_COLUMNS = (
+        "id, profile_id, kind, listen_host, listen_port, dest_host, dest_port, "
+        "listen_path, dest_path, auto_start"
+    )
+
+    def list_forwards(self, profile_id: int) -> list[ForwardSpec]:
+        """Return every forward saved for one profile, in insertion order."""
+        rows = self._conn.execute(
+            f"SELECT {self._FORWARD_COLUMNS} FROM forwards WHERE profile_id = ? ORDER BY id",
+            [profile_id],
+        ).fetchall()
+        return [self._row_to_forward(row) for row in rows]
+
+    def get_forward(self, forward_id: int) -> ForwardSpec:
+        """Return one forward by id, or raise ``KeyError``."""
+        row = self._conn.execute(
+            f"SELECT {self._FORWARD_COLUMNS} FROM forwards WHERE id = ?", [forward_id]
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"No forward with id {forward_id}.")
+        return self._row_to_forward(row)
+
+    def save_forward(self, profile_id: int, spec: ForwardSpec) -> int:
+        """Insert or update a forward for a profile and return its id.
+
+        Updating keeps the row's id so a live forward can be identified while
+        its definition is edited.
+        """
+        if spec.id is None:
+            row = self._conn.execute(
+                "INSERT INTO forwards (profile_id, kind, listen_host, listen_port, "
+                "dest_host, dest_port, listen_path, dest_path, auto_start) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                [
+                    profile_id,
+                    str(spec.kind),
+                    spec.listen_host,
+                    spec.listen_port,
+                    spec.dest_host,
+                    spec.dest_port,
+                    spec.listen_path,
+                    spec.dest_path,
+                    spec.auto_start,
+                ],
+            ).fetchone()
+            assert row is not None
+            return int(row[0])
+
+        self._conn.execute(
+            "UPDATE forwards SET kind = ?, listen_host = ?, listen_port = ?, dest_host = ?, "
+            "dest_port = ?, listen_path = ?, dest_path = ?, auto_start = ? WHERE id = ?",
+            [
+                str(spec.kind),
+                spec.listen_host,
+                spec.listen_port,
+                spec.dest_host,
+                spec.dest_port,
+                spec.listen_path,
+                spec.dest_path,
+                spec.auto_start,
+                spec.id,
+            ],
+        )
+        return spec.id
+
+    def delete_forward(self, forward_id: int) -> None:
+        """Remove one forward row."""
+        self._conn.execute("DELETE FROM forwards WHERE id = ?", [forward_id])
 
     def change_master_password(self, old_password: str, new_password: str) -> None:
         """Re-wrap the DEK under a key derived from ``new_password``.
