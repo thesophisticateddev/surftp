@@ -1,4 +1,4 @@
-d# Plan: SSH as a First-Class Connection
+# Plan: SSH as a First-Class Connection
 
 **Goal:** make SSH a protocol SURFTP connects with in its own right — a dedicated connection per SSH
 profile, its settings persisted in the vault, `.pem` identity files, and the full range of what an SSH

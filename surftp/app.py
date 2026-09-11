@@ -18,6 +18,7 @@ from textual import events, work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal
 from textual.css.query import NoMatches
+from textual.dom import DOMNode
 from textual.widget import Widget
 from textual.widgets import Footer, Header
 
@@ -34,7 +35,6 @@ from surftp.net.types import (
     Credential,
     HostKeyUnknown,
     NetworkError,
-    Protocol,
     SecretKind,
     key_passphrase_kind,
 )
@@ -63,7 +63,10 @@ class SurfFTPApp(App[None]):
 
     CSS_PATH = "app.tcss"
     TITLE = "SURFTP"
-    BINDINGS = BINDINGS
+    # A list of ``Binding`` is not assignable to the base class's broader
+    # ``list[Binding | tuple[...]]`` because ``list`` is invariant; the key map
+    # itself stays a plain ``list[Binding]`` (see ``surftp.bindings``).
+    BINDINGS = BINDINGS  # type: ignore[assignment]
 
     def __init__(self, vault_path: Path | None = None) -> None:
         """Create the app, optionally overriding the vault location (used by tests)."""
@@ -85,7 +88,7 @@ class SurfFTPApp(App[None]):
         # Shells we have opened, keyed by the session pane's id, so the child
         # process can be killed when the tab closes or the app exits. SSH-only
         # sessions (no pane) are keyed by ``ssh-<session id>``.
-        self._shells: dict[str, ShellSession] = {}
+        self._shells: dict[str | None, ShellSession] = {}
         # SSH sessions whose tab we opened but that own no file pane; keyed by
         # the same ``ssh-<session id>`` keys as ``_shells``.
         self._ssh_sessions: dict[str, RemoteConnection] = {}
@@ -158,7 +161,7 @@ class SurfFTPApp(App[None]):
             if event.widget is not self._focus_intent:
                 return
             self._focus_intent = None
-        widget: Widget | None = event.widget
+        widget: Widget | DOMNode | None = event.widget
         while widget is not None:
             if isinstance(widget, SessionTabs):
                 self._active_side = "right" if widget is self.right_sessions else "left"
@@ -205,7 +208,7 @@ class SurfFTPApp(App[None]):
         """Show Textual's built-in help panel with the full key list."""
         self.action_show_help_panel()
 
-    def action_quit(self) -> None:
+    async def action_quit(self) -> None:
         """Close any live connections and the vault, then exit."""
         self.close_everything()
 
@@ -221,6 +224,23 @@ class SurfFTPApp(App[None]):
         if self._vault is not None:
             self._vault.close()
         self.exit()
+
+    async def on_unmount(self) -> None:
+        """Close manager-owned connections on *any* teardown, not just ctrl+q.
+
+        ``SessionTabs.on_unmount`` covers connections that back a pane, but a
+        ``Protocol.SSH`` session has no pane — it lives only in the manager, so
+        nothing walked it when the app exited by any path other than
+        ``action_quit`` and the server never saw a disconnect.
+
+        An app-level hook is wrong for *panes* (its children are already gone by
+        the time it runs, which is what made the earlier leak invisible), but it
+        is right here: the manager is a module-level registry, reachable without
+        the widget tree. The credential cache holds plaintext, so its lifetime
+        ends here too.
+        """
+        await get_manager().close_all()
+        get_credential_cache().clear()
 
     async def close_all_sessions(self) -> None:
         """Close every live connection and every shell on both sides.
@@ -583,7 +603,7 @@ class SurfFTPApp(App[None]):
         except Exception:
             pass  # panel not mounted yet; harmless
 
-    def _save_forward(self, profile_id: int, spec) -> int:
+    def _save_forward(self, profile_id: int | None, spec) -> int:
         """Persist one forward definition to the vault; the ForwardsScreen's on_save hook."""
         if self._vault is None or not self._vault.is_unlocked:
             return spec.id or 0
@@ -672,7 +692,7 @@ class SurfFTPApp(App[None]):
         if sessions.active_pane is sessions._local_pane:
             self.notify("Cannot close the Local tab.")
             return
-        
+
         # Check for active transfer
         if self._current_engine is not None:
             engine = self._current_engine
@@ -680,7 +700,7 @@ class SurfFTPApp(App[None]):
             if engine._source is active_fs or engine._destination is active_fs:
                 self.notify("Cannot close tab while a transfer is in progress.", severity="warning")
                 return
-        
+
         pane = sessions.active_pane
         label = pane.filesystem.label
         pane_id = pane.id or ""
@@ -783,18 +803,9 @@ class SurfFTPApp(App[None]):
 
     async def _resolve_conflict(self, item) -> ConflictPolicy:
         """Push the conflict dialog and return the user's choice."""
-        import asyncio
-        future: asyncio.Future[ConflictPolicy] = asyncio.get_event_loop().create_future()
         name = display_name(item.source_path)
-
-        def on_dismiss(policy: ConflictPolicy | None) -> None:
-            if not future.done():
-                future.set_result(policy or ConflictPolicy.SKIP)
-
-        screen = ConflictScreen(name)
-        screen.dismiss = on_dismiss  # type: ignore[assignment]
-        await self.push_screen_async(screen)
-        return await future
+        policy = await self.push_screen_wait(ConflictScreen(name))
+        return policy or ConflictPolicy.SKIP
 
     async def _delete_source(self, source_fs, items) -> None:
         """Delete source files after a successful move."""

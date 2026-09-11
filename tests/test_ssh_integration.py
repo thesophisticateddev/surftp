@@ -375,6 +375,26 @@ async def main() -> None:
         fs.close()
         await ssh_conn.close()
 
+        print("\n[9b] a pane-less SSH session is closed on teardown, not just ctrl+q")
+        # Regression: SessionTabs.on_unmount only walks panes, and a
+        # Protocol.SSH session has none — it lives solely in the manager. Before
+        # App.on_unmount closed it, any exit other than ctrl+q left the
+        # connection open and the server never saw a disconnect.
+        from surftp.app import SurfFTPApp
+
+        teardown_app = SurfFTPApp(vault_path=WORK / "teardown.duckdb")
+        async with teardown_app.run_test() as tpilot:
+            await tpilot.pause(0.3)
+            held = await get_manager().acquire(profile(name="teardown"), Credential(password=PASSWORD))
+            check("manager holds the pane-less session", get_manager().sessions() != [])
+            check("session is live", held.is_connected)
+        check(
+            "teardown released it without ctrl+q",
+            get_manager().sessions() == [],
+            str(get_manager().sessions()),
+        )
+        check("session is closed", not held.is_connected)
+
         print("\n[9] a failed forward does not abort the connection")
         conn9 = await open_connection(profile(name="fwd-probe"), Credential(password=PASSWORD))
         session9 = conn9.session
