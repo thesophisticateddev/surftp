@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "surftp"
+description = "Two-pane terminal client for SFTP, FTP, SSH and SCP."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+dynamic = ["version"]
+dependencies = [
+    "aioftp>=0.28",
+    "argon2-cffi>=25.0",
+    "asyncssh>=2.24",
+    "bcrypt>=5.0",
+    "cryptography>=50.0",
+    "duckdb>=1.5",
+    "msgpack>=1.2",
+    "platformdirs>=4.11",
+    "pyte>=0.8",
+    "rich>=15.0",
+    "textual>=8.2",
+]
+
+[project.scripts]
+surftp = "surftp.__main__:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "surftp.__about__.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["surftp*"]

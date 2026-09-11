@@ -65,10 +65,14 @@ Implemented (see `.plans/results/`):
   `SSHConnectionManager`, multi-key auth, jump hosts, port forwards, a Connections panel and a
   v1→v2 vault migration (see `.plans/results/ssh-connections-2026-09-02.md`).
 - **Dialogs** — connect, saved-profile picker, master password, host-key trust, secret prompt.
+- **Standalone builds** — `packaging/surftp.spec` (one artifact per invocation, selected by
+  `SURFTP_BUILD_MODE`), the in-bundle `surftp/selfcheck.py` behind `--self-check`,
+  `tests/test_frozen.py`, and the `test`/`release` GitHub workflows. See
+  `.plans/results/packaging-2026-09-11.md` and `docs/building.md`.
 
 Not built yet: file transfers between panes (`plan-transfers.md`) and the SSH tunnel
-(`plan-tunnel.md`). No remote mutation (mkdir/delete/rename) yet. There is no linter config and no
-`pyproject.toml`; `docs/` and `utils/` are empty.
+(`plan-tunnel.md`). No remote mutation (mkdir/delete/rename) yet. There is no linter config;
+`utils/` is empty.
 
 ## Commands
 

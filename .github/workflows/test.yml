@@ -1,0 +1,37 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    # One job per OS rather than several parallel jobs on one runner: the
+    # standalone suites bind loopback ports 8021-8044 and start real SSH/FTP
+    # servers, so running them concurrently on the same machine would collide.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run all test suites
+        shell: bash
+        run: |
+          PY=python bash tests/run_all.sh
+
+      - name: Self-check on source
+        # The same checks the frozen artifact must pass at release time.
+        # Running them here too means a failure during packaging is a
+        # *packaging* fault, never an application one.
+        run: python -m surftp --self-check

@@ -1,0 +1,8 @@
+# Development, test and build tooling on top of the runtime dependencies.
+# Install with: pip install -r requirements-dev.txt
+-r requirements.txt
+textual-dev==1.8.0
+textual-serve==1.1.3
+pytest
+pytest-asyncio
+pyinstaller
