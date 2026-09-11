@@ -17,12 +17,38 @@ profiles in a local DuckDB vault encrypted behind a master password.
  tab Switch pane  enter Open dir  f9 Connect  ctrl+o Profiles  ? Help
 ```
 
-## Requirements
-
-- Python 3.12 or newer
-- Linux, macOS, or any platform with a terminal Textual supports
-
 ## Install
+
+### Download a binary (no Python needed)
+
+Grab the archive for your platform from the [latest release](../../releases/latest) — Linux x86\_64,
+Windows x86\_64, macOS x86\_64 and macOS arm64. Each is a self-contained build with CPython and every
+dependency inside; there is nothing to install.
+
+```bash
+tar -xzf surftp-<version>-linux-x86_64.tar.gz
+./surftp/surftp
+```
+
+Every release carries two builds per platform: the default directory build, and a `-onefile` build
+that is one file to drop on a server at the cost of a second of startup while it unpacks itself.
+
+**Verify what you downloaded before running it** — this program will hold your SSH credentials:
+
+```bash
+sha256sum -c SHA256SUMS.txt --ignore-missing
+```
+
+Windows binaries are unsigned, so SmartScreen warns on first run; use Windows Terminal rather than the
+legacy console, which renders Textual poorly. macOS binaries are signed and notarised when the
+project's signing secrets are configured, and will otherwise need a right-click → *Open*.
+
+### From source
+
+Requires **Python 3.12 or newer**, on Linux, macOS, or any platform with a terminal Textual supports.
+Dependencies are deliberately few: `textual` for the UI, `asyncssh` (SSH/SFTP/SCP) and `aioftp`
+(FTP/FTPS) for transport, and `duckdb` + `cryptography` + `argon2-cffi` + `bcrypt` for the credential
+vault.
 
 ```bash
 git clone <this repository>
@@ -33,9 +59,17 @@ source tenv/bin/activate
 pip install -r requirements.txt
 ```
 
-Dependencies are deliberately few: `textual` for the UI, `asyncssh` (SSH/SFTP/SCP) and `aioftp`
-(FTP/FTPS) for transport, and `duckdb` + `cryptography` + `argon2-cffi` + `bcrypt` for the credential
-vault.
+### Build your own binary
+
+```bash
+pip install -r requirements-dev.txt
+SURFTP_BUILD_MODE=onedir  pyinstaller --noconfirm --clean --workpath build/onedir packaging/surftp.spec
+SURFTP_BUILD_MODE=onefile pyinstaller --noconfirm --workpath build/onefile packaging/surftp.spec
+python tests/test_frozen.py     # run what you built — this is the part that matters
+```
+
+You can only build for the platform you are on. Full details, including macOS signing and the
+per-platform pitfalls, are in **[docs/building.md](docs/building.md)**.
 
 ## Running
 
@@ -164,6 +198,7 @@ textual serve "python -m surftp"          # serve the TUI over HTTP
 ```bash
 ./tests/run_all.sh                                       # every suite
 PYTHONPATH=$PWD ./tenv/bin/python tests/test_vault.py    # one suite
+./tenv/bin/python tests/test_frozen.py                   # the built binaries (see docs/building.md)
 ```
 
 The suites are standalone scripts rather than pytest; each exits non-zero on failure and prints one

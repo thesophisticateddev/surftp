@@ -341,7 +341,7 @@ class Vault:
         ).fetchone()
         if row is None:
             return None
-        return crypto.decrypt_secret(dek, bytes(row[0]), profile_id, str(kind))
+        return crypto.decrypt_secret(bytes(dek), bytes(row[0]), profile_id, str(kind))
 
     def delete_secret(self, profile_id: int, kind: SecretKind | str) -> None:
         """Remove one stored secret. Allowed while locked — deleting reveals nothing."""
@@ -390,7 +390,7 @@ class Vault:
             raise KeyError(f"No forward with id {forward_id}.")
         return self._row_to_forward(row)
 
-    def save_forward(self, profile_id: int, spec: ForwardSpec) -> int:
+    def save_forward(self, profile_id: int | None, spec: ForwardSpec) -> int:
         """Insert or update a forward for a profile and return its id.
 
         Updating keeps the row's id so a live forward can be identified while
@@ -456,6 +456,6 @@ class Vault:
         new_kek = crypto.derive_kek(new_password, new_salt, params)
         self._conn.execute(
             "UPDATE vault_meta SET kdf_salt = ?, kdf_params = ?, wrapped_dek = ?",
-            [new_salt, crypto.encode_kdf_params(params), crypto.wrap_dek(new_kek, dek)],
+            [new_salt, crypto.encode_kdf_params(params), crypto.wrap_dek(new_kek, bytes(dek))],
         )
         self._dek = dek

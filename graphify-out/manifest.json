@@ -1,0 +1,332 @@
+{
+  "/home/salman/Documents/surftp/surftp/__init__.py": {
+    "mtime": 1787931896.682644,
+    "ast_hash": "031c4cb8a6aaff35ed06753eec9f0f55",
+    "semantic_hash": "031c4cb8a6aaff35ed06753eec9f0f55"
+  },
+  "/home/salman/Documents/surftp/surftp/app.py": {
+    "mtime": 1788378950.468103,
+    "ast_hash": "905b6f86c8f6aa2bdf4cb9812bdb1220",
+    "semantic_hash": "905b6f86c8f6aa2bdf4cb9812bdb1220"
+  },
+  "/home/salman/Documents/surftp/surftp/__about__.py": {
+    "mtime": 1787931894.518182,
+    "ast_hash": "4b1b8c3315df0f773c19b08d16a35688",
+    "semantic_hash": "4b1b8c3315df0f773c19b08d16a35688"
+  },
+  "/home/salman/Documents/surftp/surftp/bindings.py": {
+    "mtime": 1788378928.9804585,
+    "ast_hash": "81beb4f24a99ae75cb2e4603b13d729b",
+    "semantic_hash": "81beb4f24a99ae75cb2e4603b13d729b"
+  },
+  "/home/salman/Documents/surftp/surftp/__main__.py": {
+    "mtime": 1787931896.6836443,
+    "ast_hash": "728d7f46db8532d1f9295aefb83ba88c",
+    "semantic_hash": "728d7f46db8532d1f9295aefb83ba88c"
+  },
+  "/home/salman/Documents/surftp/surftp/store/__init__.py": {
+    "mtime": 1787935411.9127228,
+    "ast_hash": "3d9bc5a01b3c6c8bc8028124214d6de1",
+    "semantic_hash": "3d9bc5a01b3c6c8bc8028124214d6de1"
+  },
+  "/home/salman/Documents/surftp/surftp/store/vault.py": {
+    "mtime": 1788378725.7219625,
+    "ast_hash": "2a830883ccbfb49c0588409f60b1637e",
+    "semantic_hash": "2a830883ccbfb49c0588409f60b1637e"
+  },
+  "/home/salman/Documents/surftp/surftp/store/schema.py": {
+    "mtime": 1788378697.036481,
+    "ast_hash": "6f0bc67de97621212785cef23175aacb",
+    "semantic_hash": "6f0bc67de97621212785cef23175aacb"
+  },
+  "/home/salman/Documents/surftp/surftp/store/crypto.py": {
+    "mtime": 1787935320.7023492,
+    "ast_hash": "07da01962fadc17ef4178df823074cd6",
+    "semantic_hash": "07da01962fadc17ef4178df823074cd6"
+  },
+  "/home/salman/Documents/surftp/surftp/net/__init__.py": {
+    "mtime": 1787935585.2972507,
+    "ast_hash": "f14601ec91cc997a6f32791814447305",
+    "semantic_hash": "f14601ec91cc997a6f32791814447305"
+  },
+  "/home/salman/Documents/surftp/surftp/net/errors.py": {
+    "mtime": 1787935489.3529756,
+    "ast_hash": "602beeb4a6258bd47aa054e4f62b2dab",
+    "semantic_hash": "602beeb4a6258bd47aa054e4f62b2dab"
+  },
+  "/home/salman/Documents/surftp/surftp/net/hostkeys.py": {
+    "mtime": 1787935980.1378462,
+    "ast_hash": "d8828ff0d0360e0ea013976f98f4c51f",
+    "semantic_hash": "d8828ff0d0360e0ea013976f98f4c51f"
+  },
+  "/home/salman/Documents/surftp/surftp/net/sftp.py": {
+    "mtime": 1788011510.5432346,
+    "ast_hash": "583a54b7798e598a59099fd06cd67775",
+    "semantic_hash": "583a54b7798e598a59099fd06cd67775"
+  },
+  "/home/salman/Documents/surftp/surftp/net/ssh.py": {
+    "mtime": 1788378752.059492,
+    "ast_hash": "cd22f52607b3adb0d0499669c63f20db",
+    "semantic_hash": "cd22f52607b3adb0d0499669c63f20db"
+  },
+  "/home/salman/Documents/surftp/surftp/net/connect.py": {
+    "mtime": 1788378792.3297834,
+    "ast_hash": "158da847db4d3023d2c1dc576458af34",
+    "semantic_hash": "158da847db4d3023d2c1dc576458af34"
+  },
+  "/home/salman/Documents/surftp/surftp/net/scp.py": {
+    "mtime": 1787935555.2730465,
+    "ast_hash": "b8c8570b65e094f3aa26508973072440",
+    "semantic_hash": "b8c8570b65e094f3aa26508973072440"
+  },
+  "/home/salman/Documents/surftp/surftp/net/ftp.py": {
+    "mtime": 1787951816.826105,
+    "ast_hash": "3d6ad3daf4a8d114d6bdda23a0f13b78",
+    "semantic_hash": "3d6ad3daf4a8d114d6bdda23a0f13b78"
+  },
+  "/home/salman/Documents/surftp/surftp/net/types.py": {
+    "mtime": 1788378681.6667616,
+    "ast_hash": "005b86a04030044debfe783191af60f0",
+    "semantic_hash": "005b86a04030044debfe783191af60f0"
+  },
+  "/home/salman/Documents/surftp/surftp/shell/__init__.py": {
+    "mtime": 1788002416.5767186,
+    "ast_hash": "e1805406f8f632b78d69ee0fc162c140",
+    "semantic_hash": "e1805406f8f632b78d69ee0fc162c140"
+  },
+  "/home/salman/Documents/surftp/surftp/shell/session.py": {
+    "mtime": 1788378797.7116895,
+    "ast_hash": "3b3ea765982a8f0aff547db8c327e5ee",
+    "semantic_hash": "3b3ea765982a8f0aff547db8c327e5ee"
+  },
+  "/home/salman/Documents/surftp/surftp/shell/protocol.py": {
+    "mtime": 1788001850.0442607,
+    "ast_hash": "68ef313c12b2b60a52c0e16a10195b6a",
+    "semantic_hash": "68ef313c12b2b60a52c0e16a10195b6a"
+  },
+  "/home/salman/Documents/surftp/surftp/shell/emulator.py": {
+    "mtime": 1788004452.2967494,
+    "ast_hash": "d7befa4226641f51f6587b91e9f1e5a8",
+    "semantic_hash": "d7befa4226641f51f6587b91e9f1e5a8"
+  },
+  "/home/salman/Documents/surftp/surftp/widgets/__init__.py": {
+    "mtime": 1787931952.529352,
+    "ast_hash": "29ae43c7b0860c2640d31f68e6b63add",
+    "semantic_hash": "29ae43c7b0860c2640d31f68e6b63add"
+  },
+  "/home/salman/Documents/surftp/surftp/widgets/pane.py": {
+    "mtime": 1788378871.6774194,
+    "ast_hash": "61d67b7fcdec074f7f6caaf5142fdd5c",
+    "semantic_hash": "61d67b7fcdec074f7f6caaf5142fdd5c"
+  },
+  "/home/salman/Documents/surftp/surftp/widgets/terminal.py": {
+    "mtime": 1788002303.638282,
+    "ast_hash": "f60c378eb07f475f8848d0fe9bcc3ee7",
+    "semantic_hash": "f60c378eb07f475f8848d0fe9bcc3ee7"
+  },
+  "/home/salman/Documents/surftp/surftp/widgets/dialogs.py": {
+    "mtime": 1788005348.8139813,
+    "ast_hash": "182acac2b956f17dfc6a669e304516ce",
+    "semantic_hash": "182acac2b956f17dfc6a669e304516ce"
+  },
+  "/home/salman/Documents/surftp/surftp/widgets/sessions.py": {
+    "mtime": 1788378873.830383,
+    "ast_hash": "98fd807460b51857449929cd610ce52c",
+    "semantic_hash": "98fd807460b51857449929cd610ce52c"
+  },
+  "/home/salman/Documents/surftp/surftp/widgets/bottom.py": {
+    "mtime": 1788378861.804587,
+    "ast_hash": "25899b435eb2015ebde70e35531c30e3",
+    "semantic_hash": "25899b435eb2015ebde70e35531c30e3"
+  },
+  "/home/salman/Documents/surftp/surftp/widgets/connect.py": {
+    "mtime": 1788378813.4334166,
+    "ast_hash": "6a00a1bed1b0b9df5de2cae6a78d963d",
+    "semantic_hash": "6a00a1bed1b0b9df5de2cae6a78d963d"
+  },
+  "/home/salman/Documents/surftp/surftp/widgets/transfers.py": {
+    "mtime": 1787950297.223539,
+    "ast_hash": "ad9f6af40188e81bcd68e1c0cfbee475",
+    "semantic_hash": "ad9f6af40188e81bcd68e1c0cfbee475"
+  },
+  "/home/salman/Documents/surftp/surftp/fs/__init__.py": {
+    "mtime": 1787951852.1406524,
+    "ast_hash": "1be90e7acbfb79b81dafbb65731dabac",
+    "semantic_hash": "1be90e7acbfb79b81dafbb65731dabac"
+  },
+  "/home/salman/Documents/surftp/surftp/fs/local.py": {
+    "mtime": 1787951752.9089236,
+    "ast_hash": "c1bb2a32d18ed7b5753ac2831da2a80c",
+    "semantic_hash": "c1bb2a32d18ed7b5753ac2831da2a80c"
+  },
+  "/home/salman/Documents/surftp/surftp/fs/types.py": {
+    "mtime": 1787951731.8991923,
+    "ast_hash": "1d59b4771b0c843ff23bc9a8729ea7c0",
+    "semantic_hash": "1d59b4771b0c843ff23bc9a8729ea7c0"
+  },
+  "/home/salman/Documents/surftp/surftp/transfer/__init__.py": {
+    "mtime": 1787949846.4382534,
+    "ast_hash": "56848ce9aad75ab33a1b81ba51f7d16e",
+    "semantic_hash": "56848ce9aad75ab33a1b81ba51f7d16e"
+  },
+  "/home/salman/Documents/surftp/surftp/transfer/engine.py": {
+    "mtime": 1788011526.2426805,
+    "ast_hash": "2f093fc4efd5ff0096d4a3144dacaf27",
+    "semantic_hash": "2f093fc4efd5ff0096d4a3144dacaf27"
+  },
+  "/home/salman/Documents/surftp/surftp/transfer/planner.py": {
+    "mtime": 1787949883.594787,
+    "ast_hash": "8b4378640c7b7368ce4e4545f84d8533",
+    "semantic_hash": "8b4378640c7b7368ce4e4545f84d8533"
+  },
+  "/home/salman/Documents/surftp/surftp/transfer/tuning.py": {
+    "mtime": 1787949872.8239224,
+    "ast_hash": "86b207e9d0d333202042f21fd2bf3e20",
+    "semantic_hash": "86b207e9d0d333202042f21fd2bf3e20"
+  },
+  "/home/salman/Documents/surftp/surftp/transfer/types.py": {
+    "mtime": 1787949861.1120694,
+    "ast_hash": "62c29db77697607022e32312b2b7ef30",
+    "semantic_hash": "62c29db77697607022e32312b2b7ef30"
+  },
+  "/home/salman/Documents/surftp/tests/test_ftp.py": {
+    "mtime": 1787936038.5051372,
+    "ast_hash": "da8ba3228d1a5efe2e87e1d01615cef5",
+    "semantic_hash": "da8ba3228d1a5efe2e87e1d01615cef5"
+  },
+  "/home/salman/Documents/surftp/tests/test_session_tabs.py": {
+    "mtime": 1787952878.0394535,
+    "ast_hash": "e0a7fe7ad7467ad6ff0fd1d261ad7a88",
+    "semantic_hash": "e0a7fe7ad7467ad6ff0fd1d261ad7a88"
+  },
+  "/home/salman/Documents/surftp/tests/test_integration.py": {
+    "mtime": 1787935967.4434073,
+    "ast_hash": "58b915dece3ea7dc0eaf45e0189b4c9d",
+    "semantic_hash": "58b915dece3ea7dc0eaf45e0189b4c9d"
+  },
+  "/home/salman/Documents/surftp/tests/test_shell.py": {
+    "mtime": 1788004504.0330548,
+    "ast_hash": "ab6f7ca48b5dbfcfd85565c003181ec2",
+    "semantic_hash": "ab6f7ca48b5dbfcfd85565c003181ec2"
+  },
+  "/home/salman/Documents/surftp/tests/test_permissions.py": {
+    "mtime": 1787952843.6188972,
+    "ast_hash": "109b428067d47b0f10cec9dce7723f32",
+    "semantic_hash": "109b428067d47b0f10cec9dce7723f32"
+  },
+  "/home/salman/Documents/surftp/tests/test_transfer.py": {
+    "mtime": 1788011566.8461604,
+    "ast_hash": "199d0199717afb630438b77208f19062",
+    "semantic_hash": "199d0199717afb630438b77208f19062"
+  },
+  "/home/salman/Documents/surftp/tests/test_ui_connect.py": {
+    "mtime": 1787954429.463827,
+    "ast_hash": "3e1da4f718d165556d158a195857e818",
+    "semantic_hash": "3e1da4f718d165556d158a195857e818"
+  },
+  "/home/salman/Documents/surftp/tests/test_ui.py": {
+    "mtime": 1787935870.6438189,
+    "ast_hash": "1f06054ecdb5c74ff879e49f9ccbaab4",
+    "semantic_hash": "1f06054ecdb5c74ff879e49f9ccbaab4"
+  },
+  "/home/salman/Documents/surftp/tests/test_sessions.py": {
+    "mtime": 1787955978.040083,
+    "ast_hash": "699a21aeffac2b91b36d995f74904708",
+    "semantic_hash": "699a21aeffac2b91b36d995f74904708"
+  },
+  "/home/salman/Documents/surftp/tests/test_shell_integration.py": {
+    "mtime": 1788004213.8919647,
+    "ast_hash": "92bb1f47c24aae2529bd96327b2b6cfd",
+    "semantic_hash": "92bb1f47c24aae2529bd96327b2b6cfd"
+  },
+  "/home/salman/Documents/surftp/tests/run_all.sh": {
+    "mtime": 1788011580.7962332,
+    "ast_hash": "55496c51f4c6f31c94f1c237106adb29",
+    "semantic_hash": "55496c51f4c6f31c94f1c237106adb29"
+  },
+  "/home/salman/Documents/surftp/tests/test_vault.py": {
+    "mtime": 1787936074.8098638,
+    "ast_hash": "23e7a3b45a8c2dc79410bfbd62b7b53c",
+    "semantic_hash": "23e7a3b45a8c2dc79410bfbd62b7b53c"
+  },
+  "/home/salman/Documents/surftp/utils/net-utils.py": {
+    "mtime": 1788108055.971703,
+    "ast_hash": "82f7daf4deb3457e265ca761996f0b08",
+    "semantic_hash": "82f7daf4deb3457e265ca761996f0b08"
+  },
+  "/home/salman/Documents/surftp/CLAUDE.md": {
+    "mtime": 1787936206.344401,
+    "ast_hash": "c81f263882814574a41ba355dd8d1a67",
+    "semantic_hash": "c81f263882814574a41ba355dd8d1a67"
+  },
+  "/home/salman/Documents/surftp/AGENTS.md": {
+    "mtime": 1788007330.1653037,
+    "ast_hash": "9b1eb24222bdc4a71131a3a7d34832e8",
+    "semantic_hash": "9b1eb24222bdc4a71131a3a7d34832e8"
+  },
+  "/home/salman/Documents/surftp/requirements.txt": {
+    "mtime": 1787936190.1389802,
+    "ast_hash": "454e48b3094ca47e69db63d6dcf4d946",
+    "semantic_hash": "454e48b3094ca47e69db63d6dcf4d946"
+  },
+  "/home/salman/Documents/surftp/README.md": {
+    "mtime": 1787936890.8966632,
+    "ast_hash": "86caec0a51395473a093d9e859d2a7e1",
+    "semantic_hash": "86caec0a51395473a093d9e859d2a7e1"
+  },
+  "/home/salman/Documents/surftp/.plans/plan-connections.md": {
+    "mtime": 1787932497.1591113,
+    "ast_hash": "e7bac23a00c7b81e7ffaeda80d1d2e7f",
+    "semantic_hash": "e7bac23a00c7b81e7ffaeda80d1d2e7f"
+  },
+  "/home/salman/Documents/surftp/.plans/plan-transfers.md": {
+    "mtime": 1787949003.468411,
+    "ast_hash": "d55ffe4831580f18cce7f316f22fbaae",
+    "semantic_hash": "d55ffe4831580f18cce7f316f22fbaae"
+  },
+  "/home/salman/Documents/surftp/.plans/plan-pane-tabs-and-permissions.md": {
+    "mtime": 1787951586.4970503,
+    "ast_hash": "28976a44f8fed39644b2ce5322b3a4bf",
+    "semantic_hash": "28976a44f8fed39644b2ce5322b3a4bf"
+  },
+  "/home/salman/Documents/surftp/.plans/plan-commander-ui.md": {
+    "mtime": 1787931713.534383,
+    "ast_hash": "7deb5af0118b4349aaf7f1c5c2096b00",
+    "semantic_hash": "7deb5af0118b4349aaf7f1c5c2096b00"
+  },
+  "/home/salman/Documents/surftp/.plans/plan-ssh-shell.md": {
+    "mtime": 1788001573.1847656,
+    "ast_hash": "a70d998484266a67d2bfcb77cf491526",
+    "semantic_hash": "a70d998484266a67d2bfcb77cf491526"
+  },
+  "/home/salman/Documents/surftp/.plans/plan-ssh-connections.md": {
+    "mtime": 1788373673.4109862,
+    "ast_hash": "dba194ad23baf0cd0677c02bd76393b7",
+    "semantic_hash": "dba194ad23baf0cd0677c02bd76393b7"
+  },
+  "/home/salman/Documents/surftp/.plans/results/transfers-2026-08-28.md": {
+    "mtime": 1788011639.6650264,
+    "ast_hash": "80cfa377d4988b908a16a1be66e50432",
+    "semantic_hash": "80cfa377d4988b908a16a1be66e50432"
+  },
+  "/home/salman/Documents/surftp/.plans/results/connections-2026-08-28.md": {
+    "mtime": 1787936244.7684202,
+    "ast_hash": "86dd9511020fb17d7a261a5c2c68aa7f",
+    "semantic_hash": "86dd9511020fb17d7a261a5c2c68aa7f"
+  },
+  "/home/salman/Documents/surftp/.plans/results/pane-tabs-and-permissions-2026-08-28.md": {
+    "mtime": 1787956083.892822,
+    "ast_hash": "ca84f64cf469a9c08c274cf65bd91945",
+    "semantic_hash": "ca84f64cf469a9c08c274cf65bd91945"
+  },
+  "/home/salman/Documents/surftp/.plans/results/commander-ui-2026-08-28.md": {
+    "mtime": 1787932503.5367224,
+    "ast_hash": "3fb1638a0fdb7905e3140753b15b5571",
+    "semantic_hash": "3fb1638a0fdb7905e3140753b15b5571"
+  },
+  "/home/salman/Documents/surftp/.plans/results/ssh-shell-2026-08-28.md": {
+    "mtime": 1788007169.125489,
+    "ast_hash": "1a61cccfef500eed07c155ce7e763dca",
+    "semantic_hash": "1a61cccfef500eed07c155ce7e763dca"
+  }
+}

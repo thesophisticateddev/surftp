@@ -1,0 +1,215 @@
+name: release
+
+# Builds standalone SURFTP binaries for Linux, Windows and macOS and attaches
+# them to the GitHub Release for a `v*` tag.
+#
+# The governing rule: a build that succeeds proves nothing. Every packaging
+# failure this project has hit - missing aioftp metadata, a lazily-imported
+# Textual widget, an absent app.tcss, a multiprocessing fork bomb - built
+# cleanly and then failed at runtime. So every job here *runs* what it built
+# (`tests/test_frozen.py`) and nothing is uploaded that has not started.
+
+on:
+  push:
+    tags: ['v*']
+  # Lets a release be rehearsed end to end - artifacts, no Release published.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      # One platform failing must not hide the others: a broken macOS notary
+      # run should still leave Linux and Windows binaries to inspect.
+      fail-fast: false
+      matrix:
+        include:
+          # Oldest supported runner for Linux on purpose: PyInstaller links
+          # against the build machine's glibc, so a binary built on 24.04 will
+          # not start on 22.04. Build old, run everywhere.
+          - {os: ubuntu-22.04,   target: linux-x86_64,   archive: tar.gz}
+          - {os: windows-latest, target: windows-x86_64, archive: zip}
+          # Two macOS builds rather than one universal2: a universal binary
+          # needs universal wheels for every native dependency, and duckdb and
+          # cryptography ship per-architecture wheels only.
+          - {os: macos-13,       target: macos-x86_64,   archive: tar.gz}
+          - {os: macos-14,       target: macos-arm64,    archive: tar.gz}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Read the version
+        # Single source of truth: surftp/__about__.py. The tag is checked
+        # against it below rather than becoming a second place to edit.
+        shell: bash
+        run: echo "VERSION=$(python -c 'import surftp; print(surftp.__version__)')" >> "$GITHUB_ENV"
+
+      - name: Check the tag matches the package version
+        # Catches the classic "tagged v0.2.0, shipped 0.1.0" release, where the
+        # binaries report a version nobody can match to a tag.
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$tag" != "$VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match surftp.__version__ ($VERSION)"
+            exit 1
+          fi
+
+      - name: Run all test suites
+        # On source, before packaging: an artifact is never built from code
+        # whose own suites fail.
+        shell: bash
+        run: PY=python bash tests/run_all.sh
+
+      - name: Build onedir
+        # Separate workpaths: the two modes share an Analysis if they share a
+        # build directory, which silently corrupts the onefile archive.
+        shell: bash
+        env:
+          SURFTP_BUILD_MODE: onedir
+        run: pyinstaller --noconfirm --clean --workpath build/onedir packaging/surftp.spec
+
+      - name: Build onefile
+        shell: bash
+        env:
+          SURFTP_BUILD_MODE: onefile
+        run: pyinstaller --noconfirm --workpath build/onefile packaging/surftp.spec
+
+      - name: Sign and notarise (macOS)
+        # Skips itself when the secrets are absent, so forks and pull requests
+        # still produce a testable - if Gatekeeper-unfriendly - binary.
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: |
+          packaging/macos-sign.sh dist/surftp
+          packaging/macos-sign.sh dist/surftp-onefile
+
+      - name: Verify the built artifacts
+        # The gate. Runs both binaries: --version (catches missing metadata and
+        # hidden imports), --self-check (CSS, both panes, the spawn path, the
+        # vault location) and a stray-process count. Runs *after* signing so
+        # what is tested is what ships.
+        shell: bash
+        run: python tests/test_frozen.py
+
+      - name: Archive (Unix)
+        # tar.gz, not zip: zip does not preserve the executable bit, and a
+        # downloaded binary nobody can run is not a release.
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          base="surftp-${VERSION}-${{ matrix.target }}"
+          tar -C dist -czf "artifacts/${base}.tar.gz" surftp
+          tar -C dist -czf "artifacts/${base}-onefile.tar.gz" surftp-onefile
+
+      - name: Archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          $base = "surftp-$env:VERSION-${{ matrix.target }}"
+          Compress-Archive -Path dist/surftp -DestinationPath "artifacts/$base.zip"
+          Compress-Archive -Path dist/surftp-onefile.exe -DestinationPath "artifacts/$base-onefile.zip"
+
+      - name: Checksums
+        # Users download an opaque 100 MB binary that will hold their SSH
+        # credentials. Publishing checksums is the minimum they are owed.
+        shell: bash
+        run: |
+          cd artifacts
+          if command -v sha256sum > /dev/null; then
+            sha256sum * > "SHA256SUMS-${{ matrix.target }}.txt"
+          else
+            shasum -a 256 * > "SHA256SUMS-${{ matrix.target }}.txt"
+          fi
+          cat "SHA256SUMS-${{ matrix.target }}.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: surftp-${{ matrix.target }}
+          path: artifacts/*
+          if-no-files-found: error
+
+  release:
+    name: publish
+    needs: build
+    runs-on: ubuntu-latest
+    # Tags only: a workflow_dispatch rehearsal leaves artifacts on the run and
+    # publishes nothing.
+    if: startsWith(github.ref, 'refs/tags/v')
+    # The only job in this workflow that can write to the repository.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: downloaded
+          merge-multiple: true
+
+      - name: Collect one SHA256SUMS
+        # Per-target checksum files are merged into a single file, so verifying
+        # a download is one command regardless of which platform it came from.
+        run: |
+          mkdir -p release
+          find downloaded -type f ! -name 'SHA256SUMS-*' -exec mv {} release/ \;
+          cat downloaded/SHA256SUMS-*.txt 2>/dev/null | sort -k2 > release/SHA256SUMS.txt || true
+          ls -la release
+
+      - name: Write the release notes
+        # A separate file rather than an inline heredoc: a heredoc nested in a
+        # YAML block scalar is indentation-sensitive in two languages at once.
+        # GitHub's generated changelog is appended to this by --generate-notes.
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## Downloads
+
+          Two builds per platform. Take the plain one unless you specifically want a single file:
+
+          | Build | Startup | Notes |
+          | --- | --- | --- |
+          | `surftp-<version>-<platform>` | ~0.45 s | the default: a folder holding the binary |
+          | `...-onefile` | ~1.5 s | one file, re-extracted on every launch |
+
+          Nothing needs installing: unpack and run `./surftp`.
+
+          Verify your download before running it — it will hold your SSH credentials:
+
+          ```bash
+          sha256sum -c SHA256SUMS.txt --ignore-missing
+          ```
+
+          Windows builds are unsigned, so SmartScreen will warn on first run. macOS builds are
+          signed and notarised only when the release signing secrets are configured.
+          EOF
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --title "SURFTP $GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            --generate-notes

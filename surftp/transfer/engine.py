@@ -20,7 +20,7 @@ Behaviour that is easy to get wrong, in the order it bites:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from surftp.fs.types import FileSystem, FileSystemError
@@ -62,7 +62,7 @@ class TransferEngine:
         destination: FileSystem,
         on_progress: Callable[[Progress], None],
         conflict_policy: ConflictPolicy = ConflictPolicy.ASK,
-        conflict_resolver: Callable[[TransferItem], asyncio.Future[ConflictPolicy]] | None = None,
+        conflict_resolver: Callable[[TransferItem], Awaitable[ConflictPolicy]] | None = None,
     ) -> None:
         """Create an engine.
 

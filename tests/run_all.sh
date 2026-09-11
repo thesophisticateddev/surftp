@@ -7,9 +7,15 @@
 #   - pytest suites, which are unit-level and need no server.
 # Both are listed here because "every suite" must actually mean every suite —
 # four pytest files were previously invisible to this script and so never ran.
+#
+# tests/test_frozen.py is the deliberate exception: it needs built artifacts in
+# dist/, so it runs after `pyinstaller packaging/surftp.spec` (see
+# docs/building.md) rather than on every source change.
 set -u
 cd "$(dirname "$0")/.."
-PY=./tenv/bin/python
+# The developer venv by default; CI overrides with PY=python, where the
+# dependencies are installed into the runner's own interpreter.
+PY="${PY:-./tenv/bin/python}"
 status=0
 
 for suite in tests/test_vault.py tests/test_migration.py tests/test_ssh_units.py tests/test_paths.py \
